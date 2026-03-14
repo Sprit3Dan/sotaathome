@@ -1,0 +1,3 @@
+name: autoresearch-infra
+runtime: python
+description: Infrastructure for massively collaborative autoresearch agents on k3s
