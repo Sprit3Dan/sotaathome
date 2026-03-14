@@ -18,12 +18,12 @@ def get_k8s_client():
         logger.debug("Loaded in-cluster Kubernetes config.")
     except config.config_exception.ConfigException:
         kubeconfig_path = settings.KUBECONFIG_PATH
-                if kubeconfig_path:
-                    logger.debug(f"Loading Kubernetes config from KUBECONFIG_PATH: {kubeconfig_path}")
-                    config.load_kube_config(config_file=kubeconfig_path)
-                else:
-                    logger.debug("Loading default local Kubernetes config (~/.kube/config).")
-                    config.load_kube_config()
+        if kubeconfig_path:
+            logger.debug(f"Loading Kubernetes config from KUBECONFIG_PATH: {kubeconfig_path}")
+            config.load_kube_config(config_file=kubeconfig_path)
+        else:
+            logger.debug("Loading default local Kubernetes config (~/.kube/config).")
+            config.load_kube_config()
     return client.CoreV1Api()
 
 
