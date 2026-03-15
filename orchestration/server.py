@@ -1,16 +1,46 @@
 import json
 import logging
+from datetime import datetime, timezone
+from uuid import uuid4
 
+import boto3
 import redis
 from agent import generate_init_container_spec
 from fastapi import FastAPI, HTTPException
 from k8s_deployer import deploy_research_job, list_jobs, list_nodes
-from models import ResearchItem, TaskStatusUpdate
+from models import AutoresearchJobRequest, GitHubResearchItem, InitContainerSpec, ResearchItem, TaskStatusUpdate
 from settings import settings
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AutoResearch Queue Manager")
+
+
+@app.on_event("startup")
+def _on_startup():
+    # Ensure the single shared S3 bucket exists
+    try:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+        )
+        try:
+            s3.head_bucket(Bucket="runs")
+        except Exception:
+            s3.create_bucket(Bucket="runs")
+            logger.info("Created S3 bucket 'runs'.")
+    except Exception as exc:
+        logger.warning(f"Could not ensure S3 bucket exists: {exc}")
+
+    # Start generation watcher thread
+    try:
+        from evaluator.watcher import start_watcher_thread
+        start_watcher_thread(settings)
+        logger.info("Generation watcher thread started.")
+    except Exception as exc:
+        logger.warning(f"Could not start watcher thread: {exc}")
 
 
 def get_redis_client():
@@ -227,6 +257,105 @@ def execute_task(task: ResearchItem):
         }
     except Exception as e:
         logger.exception(f"Failed to execute task directly: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/submit")
+def submit_job(req: AutoresearchJobRequest):
+    """Submit an autoresearch job with dataset, parallelism, and generation params."""
+    try:
+        gen_id = uuid4().hex[:8]
+        submitted_at = datetime.now(timezone.utc).isoformat()
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+        )
+
+        # Write manifest
+        manifest = {
+            "generation_id": gen_id,
+            "generation_num": req.generation_num,
+            "total_generations": req.generations,
+            "expected_pods": req.n,
+            "dataset_hf_repo": req.dataset_hf_repo,
+            "submitted_at": submitted_at,
+        }
+        s3.put_object(
+            Bucket="runs",
+            Key=f"generations/{gen_id}/manifest.json",
+            Body=json.dumps(manifest, indent=2).encode(),
+        )
+
+        # Store generation state in Redis
+        redis_client.hset(
+            f"generation:{gen_id}",
+            mapping={
+                "status": "running",
+                "generation_num": req.generation_num,
+                "total_generations": req.generations,
+                "expected_pods": req.n,
+                "dataset_hf_repo": req.dataset_hf_repo,
+                "request_json": req.model_dump_json(),
+            },
+        )
+
+        # Build env vars for the AR pods
+        env: dict[str, str] = {
+            "AUTORESEARCH_GENERATION_ID": gen_id,
+            "AUTORESEARCH_MAX_ITERATIONS": str(req.m),
+            "TIME_BUDGET_SECS": str(req.t),
+            "DATASET_HF_REPO": req.dataset_hf_repo,
+            "DATASET_TEXT_COLUMN": req.dataset_text_column,
+            "DATASET_TRAIN_SPLIT": req.dataset_train_split,
+            "DATASET_VAL_SPLIT": req.dataset_val_split,
+        }
+        if req.parent_candidate_ids:
+            env["AUTORESEARCH_PARENT_CANDIDATE_ID"] = req.parent_candidate_ids[0]
+        if req.parent_metric_values:
+            env["AUTORESEARCH_PARENT_METRIC_VALUE"] = str(req.parent_metric_values[0])
+        if req.research_direction:
+            env["AUTORESEARCH_RESEARCH_DIRECTION"] = req.research_direction
+
+        init_spec = InitContainerSpec(
+            image="ghcr.io/sprit3dan/sotaathome:latest",
+            env=env,
+        )
+
+        research_direction = req.research_direction or f"Minimize val_bpb on {req.dataset_hf_repo}"
+        task = GitHubResearchItem(
+            github_repo="karpathy/autoresearch",
+            research_direction=research_direction,
+            init_container_spec=init_spec,
+            job_count=req.n,
+        )
+
+        task_data = task.model_dump()
+        redis_client.rpush(QUEUE_NAME, task.model_dump_json())
+        redis_client.hset(
+            f"task:{task.id}",
+            mapping={
+                "status": "queued",
+                "repo_ref": task.repo_ref,
+                "research_direction": task.research_direction,
+                "logs": "",
+                "pod_name": "",
+                "generation_id": gen_id,
+            },
+        )
+
+        logger.info(f"Submitted generation {gen_id} (gen {req.generation_num}/{req.generations}, n={req.n}, dataset={req.dataset_hf_repo})")
+        return {
+            "status": "success",
+            "generation_id": gen_id,
+            "task_id": task.id,
+            "generation_num": req.generation_num,
+            "total_generations": req.generations,
+        }
+    except Exception as e:
+        logger.exception(f"Failed to submit job: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

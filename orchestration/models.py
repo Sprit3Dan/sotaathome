@@ -161,6 +161,22 @@ def parse_research_item(data: dict) -> Union[GitHubResearchItem, HuggingFaceRese
     return _research_item_adapter.validate_python(data)
 
 
+class AutoresearchJobRequest(BaseModel):
+    dataset_hf_repo: str = "roneneldan/TinyStories"
+    dataset_text_column: str = "text"
+    dataset_train_split: str = "train"
+    dataset_val_split: str = "validation"
+    research_direction: Optional[str] = None
+    n: int = Field(default=1, ge=1)
+    m: int = Field(default=10, ge=1)
+    t: int = Field(default=300, ge=30)
+    generations: int = Field(default=1, ge=1)
+    # Populated internally on re-submission:
+    generation_num: int = 1
+    parent_candidate_ids: list[str] = []
+    parent_metric_values: list[float] = []
+
+
 class TaskStatusUpdate(BaseModel):
     """
     Represents an update to the status of a scheduled research task.

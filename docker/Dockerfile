@@ -25,16 +25,20 @@ RUN git clone https://github.com/karpathy/autoresearch.git /opt/autoresearch-ups
 # ── Install autoresearch deps (big layer: torch 2.9.1 cu128, ~3 GB) ───────────
 RUN cd /opt/autoresearch-upstream && uv sync --python python3.11
 
-# ── Extra: datasets (for prepare-tinystories.py) ──────────────────────────────
-RUN cd /opt/autoresearch-upstream && uv pip install datasets
+# ── Extra: datasets + boto3 (for prepare-dataset.py and S3 upload) ────────────
+RUN cd /opt/autoresearch-upstream && uv pip install datasets boto3
 
 ENV PATH="/opt/autoresearch-upstream/.venv/bin:${PATH}"
 
-# ── Our helper script ─────────────────────────────────────────────────────────
-COPY docker/prepare-tinystories.py /app/prepare-tinystories.py
+# ── Our helper scripts ────────────────────────────────────────────────────────
+COPY docker/prepare-dataset.py /app/prepare-dataset.py
 COPY docker/patch-train.py /app/patch-train.py
 
 # ── Runtime defaults ───────────────────────────────────────────────────────────
+ENV DATASET_HF_REPO=roneneldan/TinyStories \
+    DATASET_TEXT_COLUMN=text \
+    DATASET_TRAIN_SPLIT=train \
+    DATASET_VAL_SPLIT=validation
 ENV AUTORESEARCH_CACHE_DIR=/artifacts/cache \
     AUTORESEARCH_OUTPUT_DIR=/artifacts/output \
     AUTORESEARCH_RUN_ID=default \

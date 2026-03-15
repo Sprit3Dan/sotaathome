@@ -112,6 +112,40 @@ class FilesystemArtifactLoader:
         return loaded
 
 
+class MinioArtifactLoader:
+    """ArtifactLoader that reads run artifacts directly from a MinIO/S3 bucket."""
+
+    def __init__(self, s3_client, bucket: str = "runs"):
+        self.s3 = s3_client
+        self.bucket = bucket
+
+    def list_runs(self, source: Union[str, Path] = "") -> List[LoadedRun]:
+        prefix = str(source)
+        paginator = self.s3.get_paginator("list_objects_v2")
+        run_prefixes: set[str] = set()
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
+            for obj in page.get("Contents", []):
+                key = obj["Key"]
+                if key.endswith("/run.json"):
+                    run_prefixes.add(key[: -len("run.json")])
+        loaded = []
+        for run_prefix in sorted(run_prefixes):
+            payloads: Dict[str, Dict] = {}
+            for filename in REQUIRED_FILES:
+                try:
+                    resp = self.s3.get_object(Bucket=self.bucket, Key=run_prefix + filename)
+                    payloads[filename] = json.loads(resp["Body"].read())
+                except Exception:
+                    pass
+            loaded.append(
+                LoadedRun(
+                    run=_build_run_artifact(Path(run_prefix), payloads),
+                    payloads=payloads,
+                )
+            )
+        return loaded
+
+
 def load_runs(root: Union[str, Path], loader: Optional[ArtifactLoader] = None) -> List[LoadedRun]:
     selected_loader = loader or FilesystemArtifactLoader()
     return selected_loader.list_runs(root)
