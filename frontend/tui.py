@@ -1,0 +1,166 @@
+import os
+import time
+from typing import Any
+
+import requests
+from rich.console import Console, Group
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+
+
+QUEUE_URL = os.getenv("QUEUE_URL", "http://orchestrator:8000")
+REFRESH_SECONDS = float(os.getenv("TUI_REFRESH_SECONDS", "2"))
+MAX_ROWS = int(os.getenv("TUI_MAX_ROWS", "12"))
+
+console = Console()
+
+
+def fetch_json(path: str) -> dict[str, Any]:
+    url = f"{QUEUE_URL.rstrip('/')}{path}"
+    try:
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc), "path": path}
+
+
+def build_summary(data: dict[str, Any]) -> Panel:
+    queue_length = data.get("queue_length", 0)
+    jobs = data.get("jobs", [])
+    nodes = data.get("nodes", [])
+    tasks = data.get("tasks", [])
+
+    active_jobs = sum(job.get("active", 0) for job in jobs)
+    failed_jobs = sum(job.get("failed", 0) for job in jobs)
+    succeeded_jobs = sum(job.get("succeeded", 0) for job in jobs)
+
+    lines = [
+        f"[bold]Queue:[/bold] {queue_length}",
+        f"[bold]Tasks tracked:[/bold] {len(tasks)}",
+        f"[bold]Jobs:[/bold] {len(jobs)}",
+        f"[bold]Nodes:[/bold] {len(nodes)}",
+        f"[bold]Active jobs:[/bold] {active_jobs}",
+        f"[bold]Succeeded jobs:[/bold] {succeeded_jobs}",
+        f"[bold]Failed jobs:[/bold] {failed_jobs}",
+    ]
+    return Panel(Group(*lines), title="Overview", border_style="cyan")
+
+
+def build_tasks_table(tasks: list[dict[str, Any]]) -> Table:
+    table = Table(expand=True)
+    table.add_column("Task ID", style="cyan", no_wrap=True)
+    table.add_column("Status", style="magenta", no_wrap=True)
+    table.add_column("Repo", style="green")
+    table.add_column("Direction", style="white")
+    table.add_column("Pod", style="yellow")
+
+    for task in tasks[:MAX_ROWS]:
+        table.add_row(
+            str(task.get("task_id", "")),
+            str(task.get("status", "")),
+            str(task.get("repo_ref", "")),
+            str(task.get("research_direction", "")),
+            str(task.get("pod_name", "")),
+        )
+    return table
+
+
+def build_jobs_table(jobs: list[dict[str, Any]]) -> Table:
+    table = Table(expand=True)
+    table.add_column("Job", style="cyan")
+    table.add_column("Namespace", style="green")
+    table.add_column("Active", justify="right")
+    table.add_column("Succeeded", justify="right")
+    table.add_column("Failed", justify="right")
+
+    for job in jobs[:MAX_ROWS]:
+        table.add_row(
+            str(job.get("name", "")),
+            str(job.get("namespace", "")),
+            str(job.get("active", 0)),
+            str(job.get("succeeded", 0)),
+            str(job.get("failed", 0)),
+        )
+    return table
+
+
+def build_nodes_table(nodes: list[dict[str, Any]]) -> Table:
+    table = Table(expand=True)
+    table.add_column("Node", style="cyan")
+    table.add_column("GPU Runtime", style="green")
+    table.add_column("Labels", style="white")
+
+    for node in nodes[:MAX_ROWS]:
+        labels = node.get("labels", {}) or {}
+        has_gpu = "yes" if "nvidia.com/gpu.present" in labels else "no"
+        label_text = ", ".join(sorted(list(labels.keys())[:6]))
+        table.add_row(
+            str(node.get("name", "")),
+            has_gpu,
+            label_text,
+        )
+    return table
+
+
+def build_error_panel(data: dict[str, Any]) -> Panel:
+    message = data.get("detail") or "Unknown error"
+    path = data.get("path", "")
+    hint = data.get("hint", "")
+    body = f"[bold red]Failed to load dashboard data[/bold red]\n{path}\n{message}"
+    if hint:
+        body = f"{body}\n\n[bold]Hint:[/bold] {hint}"
+    return Panel(
+        body,
+        title="Error",
+        border_style="red",
+    )
+
+
+def build_layout(data: dict[str, Any]):
+    if data.get("status") != "success":
+        return build_error_panel(data)
+
+    layout = Layout()
+    layout.split_column(
+        Layout(name="top", size=9),
+        Layout(name="middle", ratio=2),
+        Layout(name="bottom", ratio=2),
+    )
+    layout["middle"].split_row(
+        Layout(name="tasks", ratio=2),
+        Layout(name="jobs", ratio=1),
+    )
+
+    layout["top"].update(build_summary(data))
+    layout["tasks"].update(Panel(build_tasks_table(data.get("tasks", [])), title="Tasks"))
+    layout["jobs"].update(Panel(build_jobs_table(data.get("jobs", [])), title="Jobs"))
+    layout["bottom"].update(Panel(build_nodes_table(data.get("nodes", [])), title="Nodes"))
+
+    return layout
+
+
+def main():
+    startup = fetch_json("/cluster_status")
+    if startup.get("status") != "success":
+        startup["hint"] = (
+            "Set QUEUE_URL to the reachable orchestrator API, "
+            "for example QUEUE_URL=http://localhost:8000 when port-forwarding "
+            "or QUEUE_URL=http://orchestrator:8000 inside the cluster."
+        )
+
+    with Live(build_layout(startup), console=console, refresh_per_second=4) as live:
+        while True:
+            data = fetch_json("/cluster_status")
+            if data.get("status") != "success":
+                data["hint"] = (
+                    "Confirm the orchestrator API is reachable and /cluster_status is served."
+                )
+            live.update(build_layout(data))
+            time.sleep(REFRESH_SECONDS)
+
+
+if __name__ == "__main__":
+    main()

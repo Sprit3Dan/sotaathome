@@ -1,27 +1,24 @@
 #!/bin/bash
 set -e
 
-echo "=== Building Docker Images ==="
-# Build the agent image
-docker build -t autoresearch-agent:latest ../agent/
-
-# Build the queue test image
-docker build -t autoresearch-queue:latest ../queue/
+export KUBECONFIG="${KUBECONFIG:-$(pwd)/kubeconfig.yaml}"
 
 echo "=== Deploying with Pulumi ==="
 # Ensure Pulumi Python dependencies are installed
-pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 
-# Select the dev stack, or initialize it if it doesn't exist
-pulumi stack select dev 2>/dev/null || pulumi stack init dev
+# Select the target stack from environment, defaulting to dev
+PULUMI_STACK=autoresearch-infra
+pulumi stack select "$PULUMI_STACK" 2>/dev/null || pulumi stack init "$PULUMI_STACK"
 
 # Deploy the k3s infrastructure
-pulumi up --yes
+pulumi up --yes --stack "$PULUMI_STACK"
 
 echo "=== Deployment Complete! ==="
 echo ""
-echo "You can view the agent logs using:"
-echo "kubectl logs -l app=agent -f"
+echo "You can view the orchestrator logs using:"
+echo "kubectl logs -l app=orchestrator -f"
 echo ""
-echo "To enqueue test tasks, run a temporary pod:"
-echo "kubectl run -i --rm --tty queue-client --image=autoresearch-queue:latest --image-pull-policy=Never --restart=Never --env=\"QUEUE_URL=http://queue-api:8000\""
+echo "You can inspect the deployed services with:"
+echo "kubectl get deploy,svc,pvc"

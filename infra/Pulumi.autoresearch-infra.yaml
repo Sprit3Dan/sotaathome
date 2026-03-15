@@ -1,0 +1,14 @@
+encryptionsalt: v1:DwE5P8gLRSo=:v1:lnL7k+yKTvAq1sWH:4JE+Z/1mtOWUo3trbHID5BPQxEVKlw==
+config:
+  autoresearch-infra:openaiApiKey:
+    secure: v1:eRxsFKLwl8WOF1um:vbrLYU1YpOChpNTPHe2bWD7VdpCV8UeW2UC3LY1YyBq3pVmM0RVVYpCI+M9qTfiRShNq7vtKt0jceEwPwKrUoxrrCB2WiYTcReiw8zkSs+Ce4MhqH0b03Ri8zCwVFVSIK+Zzxxb6aEBXBycq526it90JHWnUibst2TA7TBfY4se88/rTCT5YZy273iKZG52K174lWQSB3hocf0KVnQ6d8vuoKbYX1tbz4QXMK0z6Gjkv3dwl4df1
+  autoresearch-infra:githubToken:
+    secure: v1:FKyuhQSbtY7egbUq:qez/H7k+38KwEJIfoAx34EFNj/VZGTmSbNVjvG9QLY39wdWzyEY7YytDnvLpNF0YLpjjodK3v0c=
+  autoresearch-infra:hfToken:
+    secure: v1:hQGEqvB61SuanJpn:N2I2x5X8yF7zmYpJWsTu5fHxsoo2x3Pu+Vvh2mLslfxrbVA7j1am7O4vi2XBae4u8npwygk=
+  autoresearch-infra:openaiModel: gpt-4o-2024-08-06
+  autoresearch-infra:queueName: training_queue
+  autoresearch-infra:k8sNamespace: default
+  autoresearch-infra:maxRetries: "3"
+  autoresearch-infra:pollInterval: "5"
+  autoresearch-infra:logLevel: DEBUG

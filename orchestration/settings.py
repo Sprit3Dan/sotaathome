@@ -27,6 +27,9 @@ class Settings:
     # API Tokens for repository access
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     HF_TOKEN = os.getenv("HF_TOKEN")
+    S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY")
+    S3_SECRET_KEY = os.getenv("S3_SECRET_KEY")
+    S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "http://minio:9000")
     REPO_MOUNT_PATH = os.getenv("REPO_MOUNT_PATH", "/repo")
     REPO_PATH_ENV_VAR = os.getenv("REPO_PATH_ENV_VAR", "REPO_PATH")
 

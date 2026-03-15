@@ -14,6 +14,8 @@ OUTPUT_MOUNT_PATH = "/artifacts/output"
 CACHE_HOST_PATH = "/root/hackathon/cache"
 OUTPUT_HOST_PATH = "/root/hackathon/output"
 
+MINIO_SECRET_NAME = "minio-credentials"
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +38,33 @@ def get_k8s_client():
     return client.BatchV1Api(), client.CoreV1Api()
 
 
+def list_jobs() -> list[dict]:
+    batch_api, _ = get_k8s_client()
+    jobs = batch_api.list_namespaced_job(settings.K8S_NAMESPACE).items
+    return [
+        {
+            "name": job.metadata.name,
+            "namespace": job.metadata.namespace,
+            "succeeded": job.status.succeeded or 0,
+            "failed": job.status.failed or 0,
+            "active": job.status.active or 0,
+        }
+        for job in jobs
+    ]
+
+
+def list_nodes() -> list[dict]:
+    _, core_api = get_k8s_client()
+    nodes = core_api.list_node().items
+    return [
+        {
+            "name": node.metadata.name,
+            "labels": node.metadata.labels or {},
+        }
+        for node in nodes
+    ]
+
+
 def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dict:
     """
     Deploys a Kubernetes Pod with the generated init container and a persistent volume
@@ -50,6 +79,25 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
     env_vars = [
         client.V1EnvVar(name="CUDA_VISIBLE_DEVICES", value="0"),
         client.V1EnvVar(name="AUTORESEARCH_RUN_ID", value=run_id),
+        client.V1EnvVar(name="S3_ENDPOINT_URL", value=settings.S3_ENDPOINT_URL),
+        client.V1EnvVar(
+            name="S3_ACCESS_KEY",
+            value_from=client.V1EnvVarSource(
+                secret_key_ref=client.V1SecretKeySelector(
+                    name=MINIO_SECRET_NAME,
+                    key="MINIO_ACCESS_KEY",
+                )
+            ),
+        ),
+        client.V1EnvVar(
+            name="S3_SECRET_KEY",
+            value_from=client.V1EnvVarSource(
+                secret_key_ref=client.V1SecretKeySelector(
+                    name=MINIO_SECRET_NAME,
+                    key="MINIO_SECRET_KEY",
+                )
+            ),
+        ),
     ]
     for k, v in init_spec.env.items():
         env_vars.append(client.V1EnvVar(name=k, value=str(v)))

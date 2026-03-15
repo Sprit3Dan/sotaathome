@@ -4,7 +4,7 @@ import logging
 import redis
 from agent import generate_init_container_spec
 from fastapi import FastAPI, HTTPException
-from k8s_deployer import deploy_research_job
+from k8s_deployer import deploy_research_job, list_jobs, list_nodes
 from models import ResearchItem, TaskStatusUpdate
 from settings import settings
 
@@ -122,6 +122,72 @@ def get_task(task_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get task {task_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/tasks")
+def list_tasks():
+    """List all tracked tasks for dashboard and TUI views."""
+    try:
+        tasks = []
+        for key in redis_client.scan_iter("task:*"):
+            task_id = key.split(":", 1)[1]
+            task_data = redis_client.hgetall(key)
+            if task_data:
+                tasks.append(
+                    {
+                        "task_id": task_id,
+                        "status": task_data.get("status", ""),
+                        "repo_ref": task_data.get("repo_ref", ""),
+                        "research_direction": task_data.get("research_direction", ""),
+                        "pod_name": task_data.get("pod_name", ""),
+                    }
+                )
+        tasks.sort(key=lambda item: item["task_id"])
+        return {"status": "success", "tasks": tasks}
+    except Exception as e:
+        logger.error(f"Failed to list tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/cluster_status")
+def cluster_status():
+    """Return cluster/job/task status for terminal dashboard views."""
+    try:
+        queue_length = redis_client.llen(QUEUE_NAME)
+        tasks = []
+        for key in redis_client.scan_iter("task:*"):
+            task_id = key.split(":", 1)[1]
+            task_data = redis_client.hgetall(key)
+            if task_data:
+                tasks.append(
+                    {
+                        "task_id": task_id,
+                        "status": task_data.get("status", ""),
+                        "repo_ref": task_data.get("repo_ref", ""),
+                        "research_direction": task_data.get("research_direction", ""),
+                        "pod_name": task_data.get("pod_name", ""),
+                    }
+                )
+
+        tasks.sort(key=lambda item: item["task_id"])
+
+        jobs = list_jobs()
+        try:
+            nodes = list_nodes()
+        except Exception as node_err:
+            logger.warning(f"Failed to list nodes for cluster status: {node_err}")
+            nodes = []
+
+        return {
+            "status": "success",
+            "queue_length": queue_length,
+            "tasks": tasks,
+            "jobs": jobs,
+            "nodes": nodes,
+        }
+    except Exception as e:
+        logger.error(f"Failed to get cluster status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
