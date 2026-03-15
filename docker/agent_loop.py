@@ -48,7 +48,7 @@ def run_train(workspace: Path, timeout: int) -> tuple[int, str]:
         capture_output=True,
         text=True,
         timeout=timeout,
-        env={**os.environ, "CUDA_VISIBLE_DEVICES": "0"},
+        env=os.environ.copy(),
     )
     return result.returncode, result.stdout + result.stderr
 

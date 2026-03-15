@@ -82,7 +82,6 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
     run_id = f"research-{uuid.uuid4().hex[:8]}"
 
     env_vars = [
-        client.V1EnvVar(name="CUDA_VISIBLE_DEVICES", value="0"),
         client.V1EnvVar(name="AUTORESEARCH_RUN_ID", value=run_id),
         client.V1EnvVar(name="AUTORESEARCH_CACHE_DIR", value=CACHE_MOUNT_PATH),
         client.V1EnvVar(name="AUTORESEARCH_OUTPUT_DIR", value=OUTPUT_MOUNT_PATH),
@@ -126,6 +125,10 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
         name="train",
         image=TRAINING_IMAGE,
         env=env_vars,
+        resources=client.V1ResourceRequirements(
+            limits={"nvidia.com/gpu": "1"},
+            requests={"nvidia.com/gpu": "1"},
+        ),
         volume_mounts=[
             client.V1VolumeMount(
                 name=CACHE_VOLUME_NAME,
