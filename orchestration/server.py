@@ -45,9 +45,9 @@ def _process_queue_forever():
             redis_client.hset(
                 f"task:{task_item.id}",
                 mapping={
-                    "status": result.get("status", "error"),
-                    "logs": result.get("logs", ""),
+                    "status": "running",
                     "pod_name": result.get("pod_name", ""),
+                    "job_name": result.get("job_name", ""),
                 },
             )
         except Exception as exc:

@@ -1,5 +1,4 @@
 import uuid
-import time
 import logging
 from kubernetes import client, config
 from models import ResearchItem, InitContainerSpec
@@ -199,61 +198,6 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
 
     logger.info(f"Creating Job: {job_name}...")
     batch_api.create_namespaced_job(namespace=namespace, body=job)
+    logger.info(f"Job {job_name} created. Completion tracked by watcher via S3.")
 
-    logger.info(f"Monitoring job {job_name}...")
-    status = "running"
-    logs = ""
-
-    try:
-        while True:
-            current_job = batch_api.read_namespaced_job(name=job_name, namespace=namespace)
-            if (current_job.status.succeeded or 0) >= job_count:
-                logger.info(f"Job {job_name} completed successfully.")
-                status = "success"
-                break
-            if current_job.status.failed:
-                logger.error(f"Job {job_name} failed. Fetching logs...")
-                status = "failed"
-                pods = core_api.list_namespaced_pod(
-                    namespace=namespace,
-                    label_selector=f"job-name={job_name}"
-                )
-                if pods.items:
-                    pod_name = pods.items[0].metadata.name
-                    try:
-                        main_logs = core_api.read_namespaced_pod_log(
-                            name=pod_name, namespace=namespace, container="train"
-                        )
-                        logs += f"--- Main Container Logs ---\n{main_logs}\n"
-                    except Exception as e:
-                        logs += f"Could not fetch main logs: {e}\n"
-                break
-
-            pods = core_api.list_namespaced_pod(
-                namespace=namespace,
-                label_selector=f"job-name={job_name}"
-            )
-            if pods.items:
-                pod_name = pods.items[0].metadata.name
-
-            time.sleep(settings.POLL_INTERVAL_SECONDS)
-
-    except Exception as e:
-        status = "error"
-        logs = str(e)
-        logger.exception(f"Error while monitoring job {job_name}: {e}")
-
-    if status == "success":
-        logger.info(f"Cleaning up successful job {job_name} and pod {pod_name}...")
-        try:
-            batch_api.delete_namespaced_job(
-                name=job_name,
-                namespace=namespace,
-                propagation_policy="Background"
-            )
-        except Exception:
-            pass
-    else:
-        logger.warning(f"Preserving failed job {job_name} and pod {pod_name} for inspection.")
-
-    return {"status": status, "logs": logs, "pod_name": pod_name, "job_name": job_name}
+    return {"status": "running", "logs": "", "pod_name": pod_name, "job_name": job_name}
