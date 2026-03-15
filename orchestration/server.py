@@ -1,5 +1,7 @@
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -8,12 +10,60 @@ import redis
 from agent import generate_init_container_spec
 from fastapi import FastAPI, HTTPException
 from k8s_deployer import deploy_research_job, list_jobs, list_nodes
-from models import AutoresearchJobRequest, GitHubResearchItem, InitContainerSpec, ResearchItem, TaskStatusUpdate
+from models import AutoresearchJobRequest, GitHubResearchItem, InitContainerSpec, ResearchItem, TaskStatusUpdate, parse_research_item
 from settings import settings
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="AutoResearch Queue Manager")
+worker_started = False
+worker_lock = threading.Lock()
+
+
+def _process_queue_forever():
+    logger.info("Background queue worker started.")
+    while True:
+        try:
+            task_str = redis_client.lpop(QUEUE_NAME)
+            if not task_str:
+                time.sleep(settings.POLL_INTERVAL_SECONDS)
+                continue
+
+            task_data = json.loads(task_str)
+            task_item = parse_research_item(task_data)
+            redis_client.hset(f"task:{task_item.id}", "status", "processing")
+
+            if task_item.init_container_spec:
+                spec = task_item.init_container_spec
+            else:
+                spec = generate_init_container_spec(task_item)
+
+            redis_client.hset(f"task:{task_item.id}", "status", "deploying")
+            result = deploy_research_job(task_item, spec)
+            redis_client.hset(
+                f"task:{task_item.id}",
+                mapping={
+                    "status": result.get("status", "error"),
+                    "logs": result.get("logs", ""),
+                    "pod_name": result.get("pod_name", ""),
+                },
+            )
+        except Exception as exc:
+            logger.exception(f"Background queue worker error: {exc}")
+            time.sleep(settings.POLL_INTERVAL_SECONDS)
+
+
+def start_background_worker():
+    global worker_started
+    with worker_lock:
+        if worker_started:
+            return
+        threading.Thread(
+            target=_process_queue_forever,
+            name="queue-worker",
+            daemon=True,
+        ).start()
+        worker_started = True
 
 
 @app.on_event("startup")
@@ -41,6 +91,12 @@ def _on_startup():
         logger.info("Generation watcher thread started.")
     except Exception as exc:
         logger.warning(f"Could not start watcher thread: {exc}")
+
+    try:
+        start_background_worker()
+        logger.info("Background queue worker thread started.")
+    except Exception as exc:
+        logger.warning(f"Could not start background queue worker: {exc}")
 
 
 def get_redis_client():
@@ -337,7 +393,6 @@ def submit_job(req: AutoresearchJobRequest):
             job_count=req.n,
         )
 
-        task_data = task.model_dump()
         redis_client.rpush(QUEUE_NAME, task.model_dump_json())
         redis_client.hset(
             f"task:{task.id}",
