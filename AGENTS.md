@@ -50,7 +50,13 @@ concrete job-execution capability.
   - computes bronze/silver/gold decisions
   - builds frontier roles (`gold`, `silver`, `near_miss`, `diversity`)
   - emits next-iteration job recommendations (`exploit`, `explore`, `verify`)
-- **Docs**: `docs/repo-structure.md`, `docs/autoresearch-worker.md`, `docs/turtle-test-workflow.md`, `docs/artifact-contract.md`, `docs/evaluation.md`, `docs/promotion-policy.md`, `docs/next-iteration.md`
+- **Reporting pipeline** (`evaluator/report.py`, `evaluator/report_cli.py`):
+  - runs automatically after each generation is evaluated (called from `watcher.py`)
+  - downloads evaluation artifacts from `s3://runs/evaluations/{gen_id}/`
+  - generates charts (gnuplot + graphviz dot), renders `single.md`, zips, uploads to `s3://runs/reports/{gen_id}/report.zip`
+  - non-fatal: if report generation fails the evaluation result is already saved
+  - CLI: `python3 -m evaluator.report_cli --gen-id <gen_id> [--no-upload]`
+- **Docs**: `docs/repo-structure.md`, `docs/autoresearch-worker.md`, `docs/turtle-test-workflow.md`, `docs/artifact-contract.md`, `docs/evaluation.md`, `docs/promotion-policy.md`, `docs/next-iteration.md`, `docs/reporting.md`, `docs/report-format.md`, `docs/storage-upload.md`
 
 ### Expected future evolution
 

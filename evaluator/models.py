@@ -14,6 +14,7 @@ class EvaluatorConfig:
     bronze_min_delta: float = 0.001
     silver_min_runs: int = 2
     silver_min_distinct_workers: int = 2
+    silver_min_distinct_seeds: int = 2
     gold_min_runs: int = 3
     gold_min_distinct_workers: int = 2
     gold_min_mean_delta: float = 0.001

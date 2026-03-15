@@ -60,7 +60,7 @@ def aggregate_candidates(runs: Iterable[RunArtifact]) -> List[CandidateAggregate
             primary_metric_direction=direction,
             run_count=len(group),
             valid_run_count=len(valid_runs),
-            success_count=len(valid_runs),
+            success_count=sum(1 for r in group if r.status == "completed"),
             unique_worker_count=len(workers),
             unique_seed_count=len(seeds),
             mean_delta_primary_metric=_safe_mean(deltas),

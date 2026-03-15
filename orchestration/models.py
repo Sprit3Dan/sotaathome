@@ -161,6 +161,13 @@ def parse_research_item(data: dict) -> Union[GitHubResearchItem, HuggingFaceRese
     return _research_item_adapter.validate_python(data)
 
 
+class JobAssignment(BaseModel):
+    parent_candidate_id: str
+    parent_metric_value: Optional[float] = None
+    parent_train_s3_key: Optional[str] = None
+    job_type: Optional[str] = None   # "exploit" | "explore" | "verify"
+
+
 class AutoresearchJobRequest(BaseModel):
     dataset_hf_repo: str = "roneneldan/TinyStories"
     dataset_text_column: str = "text"
@@ -174,6 +181,7 @@ class AutoresearchJobRequest(BaseModel):
     agent_script: Optional[str] = None
     # Populated internally on re-submission:
     generation_num: int = 1
+    job_assignments: list[JobAssignment] = []
     parent_candidate_ids: list[str] = []
     parent_metric_values: list[float] = []
     parent_train_s3_keys: list[str] = []

@@ -45,11 +45,14 @@ def decide_promotions(
 
             silver_reproducible = (
                 len(improved_runs) >= config.silver_min_runs
-                and len(distinct_workers) >= config.silver_min_distinct_workers
+                and (
+                    len(distinct_workers) >= config.silver_min_distinct_workers
+                    or len({r.seed for r in improved_runs}) >= config.silver_min_distinct_seeds
+                )
             )
             if silver_reproducible:
                 level = "silver"
-                reasons.append("improvement reproduced across multiple workers")
+                reasons.append("improvement reproduced across multiple workers or seeds")
 
                 gold_ready = (
                     len(improved_runs) >= config.gold_min_runs

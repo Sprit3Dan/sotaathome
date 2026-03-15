@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from k8s_deployer import deploy_research_job, list_jobs, list_nodes
-from models import AutoresearchJobRequest, GitHubResearchItem, InitContainerSpec, ResearchItem, TaskStatusUpdate, parse_research_item
+from models import AutoresearchJobRequest, GitHubResearchItem, InitContainerSpec, JobAssignment, ResearchItem, TaskStatusUpdate, parse_research_item
 from settings import settings
 
 logger = logging.getLogger(__name__)
@@ -351,12 +351,14 @@ def submit_job(req: AutoresearchJobRequest):
             aws_secret_access_key=settings.S3_SECRET_KEY,
         )
 
-        # Write manifest
+        # Write manifest (expected_pods determined after building assignments below)
+        # Placeholder — will be re-written after assignments are resolved
+        expected_pods_placeholder = len(req.job_assignments) if req.job_assignments else req.n
         manifest = {
             "generation_id": gen_id,
             "generation_num": req.generation_num,
             "total_generations": req.generations,
-            "expected_pods": req.n,
+            "expected_pods": expected_pods_placeholder,
             "dataset_hf_repo": req.dataset_hf_repo,
             "submitted_at": submitted_at,
         }
@@ -366,6 +368,20 @@ def submit_job(req: AutoresearchJobRequest):
             Body=json.dumps(manifest, indent=2).encode(),
         )
 
+        # Build per-job assignments (one pod per assignment)
+        if req.job_assignments:
+            assignments = req.job_assignments
+        else:
+            # First generation or manual submit: replicate n identical pods
+            base_assignment = JobAssignment(
+                parent_candidate_id=req.parent_candidate_ids[0] if req.parent_candidate_ids else "",
+                parent_metric_value=req.parent_metric_values[0] if req.parent_metric_values else None,
+                parent_train_s3_key=req.parent_train_s3_keys[0] if req.parent_train_s3_keys else None,
+            )
+            assignments = [base_assignment for _ in range(req.n)]
+
+        expected_pods = len(assignments)
+
         # Store generation state in Redis
         redis_client.hset(
             f"generation:{gen_id}",
@@ -373,67 +389,76 @@ def submit_job(req: AutoresearchJobRequest):
                 "status": "running",
                 "generation_num": req.generation_num,
                 "total_generations": req.generations,
-                "expected_pods": req.n,
+                "expected_pods": expected_pods,
                 "dataset_hf_repo": req.dataset_hf_repo,
                 "request_json": req.model_dump_json(),
             },
         )
 
-        # Build env vars for the AR pods
-        env: dict[str, str] = {
-            "AUTORESEARCH_GENERATION_ID": gen_id,
-            "AUTORESEARCH_MAX_ITERATIONS": str(req.m),
-            "TIME_BUDGET_SECS": str(req.t),
-            "DATASET_HF_REPO": req.dataset_hf_repo,
-            "DATASET_TEXT_COLUMN": req.dataset_text_column,
-            "DATASET_TRAIN_SPLIT": req.dataset_train_split,
-            "DATASET_VAL_SPLIT": req.dataset_val_split,
-        }
-        if req.parent_candidate_ids:
-            env["AUTORESEARCH_PARENT_CANDIDATE_ID"] = req.parent_candidate_ids[0]
-        if req.parent_metric_values:
-            env["AUTORESEARCH_PARENT_METRIC_VALUE"] = str(req.parent_metric_values[0])
-        if req.parent_train_s3_keys:
-            env["AUTORESEARCH_PARENT_TRAIN_S3_KEY"] = req.parent_train_s3_keys[0]
-        if req.research_direction:
-            env["AUTORESEARCH_RESEARCH_DIRECTION"] = req.research_direction
+        # Upload agent script once if provided
+        agent_key: str | None = None
         if req.agent_script:
             agent_key = f"agents/{gen_id}/agent.py"
             s3.put_object(Bucket="runs", Key=agent_key, Body=req.agent_script.encode())
-            env["AUTORESEARCH_AGENT_S3_KEY"] = agent_key
             logger.info(f"Uploaded custom agent to s3://runs/{agent_key}")
 
-        init_spec = InitContainerSpec(
-            image="ghcr.io/sprit3dan/sotaathome:latest",
-            env=env,
-        )
-
         research_direction = req.research_direction or f"Minimize val_bpb on {req.dataset_hf_repo}"
-        task = GitHubResearchItem(
-            github_repo="karpathy/autoresearch",
-            research_direction=research_direction,
-            init_container_spec=init_spec,
-            job_count=req.n,
-        )
+        task_ids = []
 
-        redis_client.rpush(QUEUE_NAME, task.model_dump_json())
-        redis_client.hset(
-            f"task:{task.id}",
-            mapping={
-                "status": "queued",
-                "repo_ref": task.repo_ref,
-                "research_direction": task.research_direction,
-                "logs": "",
-                "pod_name": "",
-                "generation_id": gen_id,
-            },
-        )
+        for assignment in assignments:
+            env: dict[str, str] = {
+                "AUTORESEARCH_GENERATION_ID": gen_id,
+                "AUTORESEARCH_MAX_ITERATIONS": str(req.m),
+                "TIME_BUDGET_SECS": str(req.t),
+                "DATASET_HF_REPO": req.dataset_hf_repo,
+                "DATASET_TEXT_COLUMN": req.dataset_text_column,
+                "DATASET_TRAIN_SPLIT": req.dataset_train_split,
+                "DATASET_VAL_SPLIT": req.dataset_val_split,
+            }
+            if assignment.parent_candidate_id:
+                env["AUTORESEARCH_PARENT_CANDIDATE_ID"] = assignment.parent_candidate_id
+            if assignment.parent_metric_value is not None:
+                env["AUTORESEARCH_PARENT_METRIC_VALUE"] = str(assignment.parent_metric_value)
+            if assignment.parent_train_s3_key:
+                env["AUTORESEARCH_PARENT_TRAIN_S3_KEY"] = assignment.parent_train_s3_key
+            if req.research_direction:
+                env["AUTORESEARCH_RESEARCH_DIRECTION"] = req.research_direction
+            if agent_key:
+                env["AUTORESEARCH_AGENT_S3_KEY"] = agent_key
 
-        logger.info(f"Submitted generation {gen_id} (gen {req.generation_num}/{req.generations}, n={req.n}, dataset={req.dataset_hf_repo})")
+            init_spec = InitContainerSpec(
+                image="ghcr.io/sprit3dan/sotaathome:latest",
+                env=env,
+            )
+            task = GitHubResearchItem(
+                github_repo="karpathy/autoresearch",
+                research_direction=research_direction,
+                init_container_spec=init_spec,
+                job_count=1,
+            )
+
+            redis_client.rpush(QUEUE_NAME, task.model_dump_json())
+            redis_client.hset(
+                f"task:{task.id}",
+                mapping={
+                    "status": "queued",
+                    "repo_ref": task.repo_ref,
+                    "research_direction": task.research_direction,
+                    "logs": "",
+                    "pod_name": "",
+                    "generation_id": gen_id,
+                },
+            )
+            task_ids.append(task.id)
+
+        logger.info(
+            f"Submitted generation {gen_id} (gen {req.generation_num}/{req.generations}, "
+            f"pods={expected_pods}, dataset={req.dataset_hf_repo})"
+        )
         return {
             "status": "success",
             "generation_id": gen_id,
-            "task_id": task.id,
+            "task_ids": task_ids,
             "generation_num": req.generation_num,
             "total_generations": req.generations,
         }

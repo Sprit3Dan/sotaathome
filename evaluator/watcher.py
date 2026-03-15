@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 import threading
 import time
+from pathlib import Path
 from typing import Any, Dict, List
 
 import boto3
@@ -54,7 +56,7 @@ def _upload_json(s3, key: str, data: Any) -> None:
 
 # ── Evaluation pipeline ───────────────────────────────────────────────────────
 
-def _run_evaluation(s3, gen_id: str) -> List[Dict]:
+def _run_evaluation(s3, gen_id: str):
     """
     Run the evaluator pipeline using MinioArtifactLoader.
     Uploads all result JSONs to minio under evaluations/{gen_id}/.
@@ -75,7 +77,7 @@ def _run_evaluation(s3, gen_id: str) -> List[Dict]:
     loaded = load_runs(prefix, loader=loader)
     if not loaded:
         logger.warning(f"[watcher] No runs loaded for gen {gen_id}")
-        return []
+        return [], None, None
 
     runs = [validate_run(item.run, item.payloads, config) for item in loaded]
     aggregates = aggregate_candidates(runs)
@@ -91,18 +93,33 @@ def _run_evaluation(s3, gen_id: str) -> List[Dict]:
     _upload_json(s3, eval_prefix + "next_jobs.json", [j.to_dict() for j in next_jobs])
     _upload_json(s3, eval_prefix + "allocation_summary.json", allocation_summary.to_dict())
 
-    # Build best metric value per candidate (min direction assumed for val_bpb)
+    # Build best metric value per candidate (direction-aware) and track run_id
     metric_by_candidate: Dict[str, float] = {}
+    run_id_by_candidate: Dict[str, str] = {}
     for r in runs:
         cid = r.candidate_id
         val = r.run_primary_metric_value
-        if cid not in metric_by_candidate or val < metric_by_candidate[cid]:
+        direction = r.primary_metric_direction
+        if cid not in metric_by_candidate:
             metric_by_candidate[cid] = val
+            run_id_by_candidate[cid] = r.run_id
+        else:
+            current = metric_by_candidate[cid]
+            is_better = (val < current) if direction == "min" else (val > current)
+            if is_better:
+                metric_by_candidate[cid] = val
+                run_id_by_candidate[cid] = r.run_id
 
     enriched = []
     for job in next_jobs:
         d = job.to_dict()
-        d["metric_value"] = metric_by_candidate.get(job.parent_candidate_id)
+        cid = job.parent_candidate_id
+        d["metric_value"] = metric_by_candidate.get(cid)
+        d["train_s3_key"] = (
+            f"generations/{gen_id}/{run_id_by_candidate[cid]}/train.py"
+            if cid in run_id_by_candidate
+            else None
+        )
         enriched.append(d)
 
     # Compute generation-level best
@@ -152,6 +169,14 @@ def _process_generation(r: redis.Redis, s3, gen_id: str) -> None:
     r.hset(gen_key, "status", "evaluated")
     logger.info(f"[watcher] gen={gen_id} evaluated. next_jobs={len(next_jobs)}")
 
+    try:
+        from evaluator.report import generate_report
+        with tempfile.TemporaryDirectory() as tmp:
+            zip_path = generate_report(s3, gen_id, Path(tmp))
+            logger.info(f"[watcher] Report generated: {zip_path}")
+    except Exception as exc:
+        logger.warning(f"[watcher] Report generation failed for gen {gen_id}: {exc}")
+
     gen_num = int(gen_data.get("generation_num", 1))
     total_gens = int(gen_data.get("total_generations", 1))
 
@@ -168,26 +193,29 @@ def _process_generation(r: redis.Redis, s3, gen_id: str) -> None:
         r.hset(gen_key, "status", "done")
         return
 
-    # Deduplicate parent candidates preserving order
-    seen: set[str] = set()
-    parent_ids: List[str] = []
-    parent_vals: List[float] = []
-    for job in next_jobs:
-        cid = job.get("parent_candidate_id")
-        val = job.get("metric_value")
-        if cid and cid not in seen and val is not None:
-            seen.add(cid)
-            parent_ids.append(cid)
-            parent_vals.append(val)
-
-    parent_train_keys = [f"generations/{gen_id}/{cid}/train.py" for cid in parent_ids]
+    job_assignments = [
+        {
+            "parent_candidate_id": job.get("parent_candidate_id"),
+            "parent_metric_value": job.get("metric_value"),
+            "parent_train_s3_key": job.get("train_s3_key"),
+            "job_type": job.get("job_type"),
+        }
+        for job in next_jobs
+        if job.get("parent_candidate_id")
+    ]
 
     next_req = {
         **orig_req,
         "generation_num": gen_num + 1,
-        "parent_candidate_ids": parent_ids,
-        "parent_metric_values": parent_vals,
-        "parent_train_s3_keys": parent_train_keys,
+        "job_assignments": job_assignments,
+        # legacy fields for backwards compat / first-gen fallback
+        "parent_candidate_ids": [j["parent_candidate_id"] for j in job_assignments],
+        "parent_metric_values": [
+            j["parent_metric_value"]
+            for j in job_assignments
+            if j["parent_metric_value"] is not None
+        ],
+        "parent_train_s3_keys": [],  # no longer used; job_assignments takes precedence
     }
 
     try:
