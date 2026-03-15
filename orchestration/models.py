@@ -176,6 +176,7 @@ class AutoresearchJobRequest(BaseModel):
     generation_num: int = 1
     parent_candidate_ids: list[str] = []
     parent_metric_values: list[float] = []
+    parent_train_s3_keys: list[str] = []
 
 
 class TaskStatusUpdate(BaseModel):

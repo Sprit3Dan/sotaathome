@@ -180,11 +180,14 @@ def _process_generation(r: redis.Redis, s3, gen_id: str) -> None:
             parent_ids.append(cid)
             parent_vals.append(val)
 
+    parent_train_keys = [f"generations/{gen_id}/{cid}/train.py" for cid in parent_ids]
+
     next_req = {
         **orig_req,
         "generation_num": gen_num + 1,
         "parent_candidate_ids": parent_ids,
         "parent_metric_values": parent_vals,
+        "parent_train_s3_keys": parent_train_keys,
     }
 
     try:

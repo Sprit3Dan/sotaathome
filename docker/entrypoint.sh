@@ -108,6 +108,24 @@ log "Copying upstream to workspace: ${WORKSPACE}"
 mkdir -p /workspace
 cp -r /opt/autoresearch-upstream "${WORKSPACE}"
 
+# ── 7a. Inherit parent train.py (if provided) ─────────────────────────────────
+# When a parent generation promoted a candidate, its train.py is downloaded from
+# S3 and placed into the workspace before patching. This is how improvements
+# compound across generations: each generation starts from the best prior result
+# rather than from upstream scratch.
+if [[ -n "${AUTORESEARCH_PARENT_TRAIN_S3_KEY:-}" && -n "${S3_ENDPOINT_URL:-}" ]]; then
+    log "Inheriting parent train.py from s3://runs/${AUTORESEARCH_PARENT_TRAIN_S3_KEY}"
+    python3 -c "
+import boto3, os
+s3 = boto3.client('s3', endpoint_url=os.environ['S3_ENDPOINT_URL'],
+    aws_access_key_id=os.environ['S3_ACCESS_KEY'],
+    aws_secret_access_key=os.environ['S3_SECRET_KEY'])
+s3.download_file('runs', os.environ['AUTORESEARCH_PARENT_TRAIN_S3_KEY'], '${WORKSPACE}/train.py')
+print('[entrypoint] Parent train.py downloaded.')
+"
+    log "Parent train.py installed into workspace (patches will be applied next)"
+fi
+
 # Patch DEPTH (model size: n_layers = DEPTH, model_dim = DEPTH × 64 rounded to HEAD_DIM=128)
 log "Patching DEPTH=${DEPTH} in workspace train.py ..."
 sed -i "s/^DEPTH = [0-9]\+/DEPTH = ${DEPTH}/" "${WORKSPACE}/train.py"

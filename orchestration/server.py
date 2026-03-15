@@ -393,6 +393,8 @@ def submit_job(req: AutoresearchJobRequest):
             env["AUTORESEARCH_PARENT_CANDIDATE_ID"] = req.parent_candidate_ids[0]
         if req.parent_metric_values:
             env["AUTORESEARCH_PARENT_METRIC_VALUE"] = str(req.parent_metric_values[0])
+        if req.parent_train_s3_keys:
+            env["AUTORESEARCH_PARENT_TRAIN_S3_KEY"] = req.parent_train_s3_keys[0]
         if req.research_direction:
             env["AUTORESEARCH_RESEARCH_DIRECTION"] = req.research_direction
         if req.agent_script:
