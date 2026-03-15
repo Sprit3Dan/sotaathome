@@ -1,7 +1,10 @@
 # autoresearch-worker: Design and Runtime Contract
 
 The `autoresearch-worker` Docker image wraps [karpathy/autoresearch](https://github.com/karpathy/autoresearch)
-for single-GPU distributed training runs. One container = one GPU.
+for single-GPU agentic training runs. One container = one GPU.
+
+Under normal operation, pods are created and managed by the orchestration server
+via the Kubernetes deployer — not launched manually via `scripts/run.sh`.
 
 ---
 
@@ -9,8 +12,7 @@ for single-GPU distributed training runs. One container = one GPU.
 
 - Repo: `https://github.com/karpathy/autoresearch`
 - Pinned SHA: `c2450add72cc80317be1fe8111974b892da10944`
-- Key files: `prepare.py` (data download), `train.py` (300s training run)
-- No `research.py` / no LLM loop at this commit
+- Key files: `prepare.py` (tokenizer training), `train.py` (training loop)
 
 ## Base image
 
@@ -18,7 +20,6 @@ for single-GPU distributed training runs. One container = one GPU.
 
 - `12.8.1` matches `torch==2.9.1` cu128 wheels
 - `devel` (not `runtime`) — needed for Triton JIT via `torch.compile()`
-- `ubuntu22.04` — stable NVIDIA image support; Python 3.11 via deadsnakes PPA
 - CUDA 13.0 host driver on turtle is forward-compatible with 12.8 container ABI
 
 ---
@@ -28,73 +29,129 @@ for single-GPU distributed training runs. One container = one GPU.
 ### Bind mounts
 
 | Container path | Purpose | Required |
-|----------------|---------|----------|
+|---|---|---|
 | `/artifacts/cache` | Dataset shards + tokenizer; persists across runs | Yes |
 | `/artifacts/output` | Logs + summaries; persists across runs | Yes |
-| `/artifacts/input` | Reserved for future orchestrator inputs | No |
 
 ### Environment variables
 
 | Variable | Default | Notes |
-|----------|---------|-------|
-| `AUTORESEARCH_CACHE_DIR` | `/artifacts/cache` | Where cache symlink points |
-| `AUTORESEARCH_OUTPUT_DIR` | `/artifacts/output` | Where logs and summary go |
-| `AUTORESEARCH_INPUT_DIR` | `/artifacts/input` | Reserved |
-| `AUTORESEARCH_RUN_ID` | `default` | Labels output subdirectory |
-| `AUTORESEARCH_MAX_ITERATIONS` | `3` | Set to `0` for prepare-only |
-| `AUTORESEARCH_NUM_SHARDS` | `2` | ~2.4 GB download |
-| `AUTORESEARCH_VISIBLE_GPU` | `0` | Documentary; Docker `--gpus device=N` controls actual GPU |
-| `DEVICE_BATCH_SIZE` | `64` | sed-patched into workspace copy of train.py |
-| `HF_TOKEN` | (unset) | Pass if HuggingFace rate-limits prepare.py |
+|---|---|---|
+| `AUTORESEARCH_CACHE_DIR` | `/artifacts/cache` | Cache bind-mount path |
+| `AUTORESEARCH_OUTPUT_DIR` | `/artifacts/output` | Output bind-mount path |
+| `AUTORESEARCH_RUN_ID` | `default` | Labels output files and S3 keys |
+| `AUTORESEARCH_MAX_ITERATIONS` | `3` | Agent loop max iterations; `0` = prepare-only |
+| `AUTORESEARCH_NUM_SHARDS` | `2` | Dataset shards to create |
+| `AUTORESEARCH_GENERATION_ID` | `ungrouped` | S3 path prefix for this generation |
+| `AUTORESEARCH_RESEARCH_DIRECTION` | (unset) | Written into `program.md`; steers the agent |
+| `AUTORESEARCH_PARENT_CANDIDATE_ID` | (unset) | Parent run ID for lineage.json |
+| `AUTORESEARCH_PARENT_METRIC_VALUE` | (unset) | Parent val_bpb for lineage.json |
+| `AUTORESEARCH_AGENT_S3_KEY` | (unset) | S3 key of custom agent script; replaces built-in agent |
+| `DATASET_HF_REPO` | `roneneldan/TinyStories` | HuggingFace dataset repo |
+| `DATASET_TEXT_COLUMN` | `text` | Text column in the dataset |
+| `DATASET_TRAIN_SPLIT` | `train` | Training split |
+| `DATASET_VAL_SPLIT` | `validation` | Validation split |
+| `DEPTH` | `4` | Model depth: n_layers=DEPTH, dim=DEPTH×64 rounded to 128 |
+| `DEVICE_BATCH_SIZE` | `8` | Sequences per micro-step; reduce if CUDA OOM |
+| `TIME_BUDGET_SECS` | `300` | Per-pod time budget passed to the agent loop |
+| `S3_ENDPOINT_URL` | (unset) | MinIO endpoint; upload skipped if not set |
+| `S3_ACCESS_KEY` | (unset) | MinIO access key |
+| `S3_SECRET_KEY` | (unset) | MinIO secret key |
+| `HF_TOKEN` | (unset) | Pass if HuggingFace rate-limits dataset download |
 
 ### GPU assignment
 
 Pass `--gpus "device=N"` to `docker run`. Docker presents the selected GPU as `device=0`
 inside the container. The entrypoint always runs `CUDA_VISIBLE_DEVICES=0`.
 
+Under Kubernetes (normal operation), the RuntimeClass `nvidia` and node-level GPU
+resources handle GPU assignment automatically.
+
 ---
 
 ## Entrypoint phases
 
 1. **Validate mounts** — die loudly if `/artifacts/cache` or `/artifacts/output` missing
-2. **Cache symlink** — `ln -s /artifacts/cache/autoresearch /root/.cache/autoresearch`
-   so `prepare.py` and `train.py` see their expected cache path
-3. **Workspace copy** — `cp -r /opt/autoresearch-upstream /workspace/<run-id>`
-   (upstream reference is never modified)
-4. **DEVICE_BATCH_SIZE patch** — `sed` replaces `128` with the requested value in workspace `train.py`;
-   `grep` verifies the patch applied; fails hard if not
-5. **prepare.py** — skipped if `tokenizer/` and `data/` dirs already exist in cache
-6. **Training loop** — N × `train.py` (each runs for 300 s); logs to `iter-001.log` etc.
-7. **Summary** — writes `summary.txt` with `key=value` lines including `failed=0/1`
+2. **Cache symlink** — `ln -s /artifacts/cache/autoresearch /root/.cache/autoresearch`;
+   also sets `HF_DATASETS_CACHE` on the bind-mount
+3. **prepare-dataset.py** — downloads the HF dataset as parquet shards into the cache;
+   output goes under `${AR_CACHE}/<dataset-slug>/data/`
+4. **Dataset symlinks** — `${AR_CACHE}/data` and `${AR_CACHE}/tokenizer` are symlinked
+   to the dataset-slug subdirectory so autoresearch sees its expected paths
+5. **prepare.py** — trains the BPE tokenizer; skipped if `tokenizer.pkl` already exists
+6. **Prepare-only exit** — if `MAX_ITERATIONS=0`, exits here
+7. **Workspace copy + patches** — copies upstream to `/workspace/<run-id>`;
+   sed-patches `DEPTH` and `DEVICE_BATCH_SIZE` in the workspace `train.py`;
+   writes `AUTORESEARCH_RESEARCH_DIRECTION` into `program.md` if set;
+   applies FA3→SDPA fallback patch via `patch-train.py`
+8. **Agent loop** — runs `agent_loop.py` (or a custom agent downloaded from S3);
+   all output tee'd to `${OUTPUT_DIR}/agent-<run-id>.log`
+9. **Summary** — writes `${OUTPUT_DIR}/summary-<run-id>.txt` with key=value lines
+10. **Artifact contract + S3 upload** — writes `run.json`, `metrics.json`, `lineage.json`,
+    and copies final `train.py` into `${OUTPUT_DIR}/<run-id>/`;
+    uploads all files to `s3://runs/generations/<gen-id>/<run-id>/` if `S3_ENDPOINT_URL` is set
 
-### prepare-only mode
+### Prepare-only mode
 
-Set `AUTORESEARCH_MAX_ITERATIONS=0`. Entrypoint exits after `prepare.py` completes.
+Set `AUTORESEARCH_MAX_ITERATIONS=0`. Entrypoint exits after the tokenizer step.
 Used by `scripts/prepare-cache.sh` to seed the cache without running training.
+
+---
+
+## Output file layout
+
+All paths are relative to `HOST_OUTPUT_DIR` on the host (default `~/hackathon/output`):
+
+```
+<HOST_OUTPUT_DIR>/
+  prepare-ds-<run-id>.log      Dataset download + tokenizer log
+  agent-<run-id>.log           Agent loop stdout/stderr
+  summary-<run-id>.txt         Key=value summary
+  <run-id>/
+    run.json                   Operational metadata (artifact contract)
+    metrics.json               Primary metric: val_bpb
+    lineage.json               Parent candidate linkage
+    train.py                   Final train.py the agent produced
+```
+
+`summary-<run-id>.txt` fields:
+```
+run_id=<run-id>
+date=<ISO timestamp>
+depth=<DEPTH>
+device_batch_size=<DEVICE_BATCH_SIZE>
+num_shards=<NUM_SHARDS>
+iterations=<MAX_ITERATIONS>
+failed=0           # or 1 if agent loop exited non-zero
+dataset_hf_repo=<DATASET_HF_REPO>
+wall_clock_seconds=<elapsed>
+```
 
 ---
 
 ## Disk budget
 
 | Item | Size |
-|------|------|
+|---|---|
 | Base CUDA image | ~5 GB |
 | torch 2.9.1 cu128 + deps | ~3 GB |
-| 2 data shards + tokenizer | ~2.4 GB |
+| Dataset (TinyStories, 3 shards) | ~2.4 GB |
 | **Total** | **~10.4 GB** |
 
-Turtle has ~24 GB free disk. Avoid parallel builds; run `docker system prune -f` after
-failed builds to reclaim space.
+Turtle has ~24 GB free disk. Avoid parallel builds. Run `docker system prune -f`
+after failed builds to reclaim space.
 
 ---
 
 ## OOM recovery
 
-Default `DEVICE_BATCH_SIZE=64` targets 12 GB VRAM (RTX 2060). If iteration 1 exits
-with CUDA OOM:
+Default `DEVICE_BATCH_SIZE=8` (set by k8s_deployer). If a pod OOMs, the job is
+marked `failed` and preserved for inspection. To retry with smaller batch, adjust
+`DEVICE_BATCH_SIZE` in `orchestration/k8s_deployer.py` and resubmit.
 
+For manual runs via `scripts/run.sh`:
 ```bash
-BATCH_SIZE=32 ./scripts/run.sh
+DEVICE_BATCH_SIZE=4 ./scripts/run.sh
 ```
 
 ---
@@ -102,5 +159,16 @@ BATCH_SIZE=32 ./scripts/run.sh
 ## Flash Attention 3 / Triton notes
 
 - FA3 requires Hopper (sm90+). RTX 2060 is Turing (sm75).
-- Upstream falls back silently — expect slower throughput and slightly higher VRAM use.
+- `patch-train.py` replaces FA3 calls with SDPA fallback — this is applied automatically.
 - `torch.compile()` warmup takes 30–60 s on first iteration. This is normal.
+
+---
+
+## Adding new autoresearch capabilities
+
+When modifying the worker:
+- Update the pinned `AUTORESEARCH_COMMIT` ARG in `docker/Dockerfile` and re-verify patches apply
+- Extend `docker/entrypoint.sh` following the existing phase structure
+- Update this doc's env var table and phase list if behavior changes
+- Add recovery notes to `docs/turtle-test-workflow.md` for new failure modes
+- Rebuild and push: `./orchestration/buildAndPush.sh`
