@@ -8,7 +8,7 @@ class Settings:
     """
 
     # OpenAI Settings
-    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-2024-08-06")
+    OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4")
 
     # Queue & Redis Settings
     QUEUE_URL = os.getenv("QUEUE_URL", "http://localhost:8000")

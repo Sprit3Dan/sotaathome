@@ -318,6 +318,11 @@ def submit_job(req: AutoresearchJobRequest):
             env["AUTORESEARCH_PARENT_METRIC_VALUE"] = str(req.parent_metric_values[0])
         if req.research_direction:
             env["AUTORESEARCH_RESEARCH_DIRECTION"] = req.research_direction
+        if req.agent_script:
+            agent_key = f"agents/{gen_id}/agent.py"
+            s3.put_object(Bucket="runs", Key=agent_key, Body=req.agent_script.encode())
+            env["AUTORESEARCH_AGENT_S3_KEY"] = agent_key
+            logger.info(f"Uploaded custom agent to s3://runs/{agent_key}")
 
         init_spec = InitContainerSpec(
             image="ghcr.io/sprit3dan/sotaathome:latest",

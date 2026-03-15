@@ -135,33 +135,34 @@ if [[ -n "${AUTORESEARCH_RESEARCH_DIRECTION:-}" ]]; then
     printf '%s\n' "${AUTORESEARCH_RESEARCH_DIRECTION}" > "${WORKSPACE}/program.md"
 fi
 
-# ── 8. Training loop ──────────────────────────────────────────────────────────
+# ── 8. Agent loop ─────────────────────────────────────────────────────────────
 FAILED=0
 
-for (( i=1; i<=MAX_ITERATIONS; i++ )); do
-    ITER_TAG="$(printf '%03d' ${i})"
-    ITER_LOG="${OUTPUT_DIR}/iter-${ITER_TAG}-${RUN_ID}.log"
-    log "--- Iteration ${i}/${MAX_ITERATIONS} → ${ITER_LOG}"
+if [[ -n "${AUTORESEARCH_AGENT_S3_KEY:-}" && -n "${S3_ENDPOINT_URL:-}" ]]; then
+    log "Downloading custom agent: ${AUTORESEARCH_AGENT_S3_KEY}"
+    python3 -c "
+import boto3, os
+s3 = boto3.client('s3', endpoint_url=os.environ['S3_ENDPOINT_URL'],
+    aws_access_key_id=os.environ['S3_ACCESS_KEY'],
+    aws_secret_access_key=os.environ['S3_SECRET_KEY'])
+s3.download_file('runs', os.environ['AUTORESEARCH_AGENT_S3_KEY'], '/tmp/custom_agent.py')
+"
+    AGENT_SCRIPT="/tmp/custom_agent.py"
+else
+    log "Using built-in agent."
+    AGENT_SCRIPT="/app/agent_loop.py"
+fi
 
-    set +e
-    ( cd "${WORKSPACE}" && CUDA_VISIBLE_DEVICES=0 python train.py ) \
-        2>&1 | tee "${ITER_LOG}"
-    EXIT_CODE=${PIPESTATUS[0]}
-    set -e
-
-    if [[ ${EXIT_CODE} -ne 0 ]]; then
-        log "WARNING: train.py exited ${EXIT_CODE} on iteration ${i}."
-        FAILED=1
-        break
-    fi
-
-    # Extract summary metrics (best-effort)
-    VAL_BPB=$(grep -oP 'val_bpb:\s+\K[0-9.]+' "${ITER_LOG}"   | tail -1 || echo "N/A")
-    VRAM_MB=$(grep -oP 'peak_vram_mb:\s+\K[0-9.]+' "${ITER_LOG}" | tail -1 || echo "N/A")
-    MFU=$(grep -oP 'mfu_percent:\s+\K[0-9.]+' "${ITER_LOG}"    | tail -1 || echo "N/A")
-    TOKENS_M=$(grep -oP 'total_tokens_M:\s+\K[0-9.]+' "${ITER_LOG}" | tail -1 || echo "N/A")
-    log "iter=${i} val_bpb=${VAL_BPB} peak_vram_mb=${VRAM_MB} mfu_percent=${MFU} total_tokens_M=${TOKENS_M}"
-done
+set +e
+python3 "${AGENT_SCRIPT}" \
+    --workspace      "${WORKSPACE}" \
+    --output-dir     "${OUTPUT_DIR}" \
+    --run-id         "${RUN_ID}" \
+    --max-iterations "${MAX_ITERATIONS}" \
+    --time-budget    "${TIME_BUDGET_SECS}" \
+    2>&1 | tee "${OUTPUT_DIR}/agent-${RUN_ID}.log"
+[[ ${PIPESTATUS[0]} -ne 0 ]] && FAILED=1
+set -e
 
 # ── 9. Summary ────────────────────────────────────────────────────────────────
 END_EPOCH=$(date +%s)

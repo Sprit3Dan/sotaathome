@@ -26,13 +26,14 @@ RUN git clone https://github.com/karpathy/autoresearch.git /opt/autoresearch-ups
 RUN cd /opt/autoresearch-upstream && uv sync --python python3.11
 
 # ── Extra: datasets + boto3 (for prepare-dataset.py and S3 upload) ────────────
-RUN cd /opt/autoresearch-upstream && uv pip install datasets boto3
+RUN cd /opt/autoresearch-upstream && uv pip install datasets boto3 openai
 
 ENV PATH="/opt/autoresearch-upstream/.venv/bin:${PATH}"
 
 # ── Our helper scripts ────────────────────────────────────────────────────────
 COPY docker/prepare-dataset.py /app/prepare-dataset.py
 COPY docker/patch-train.py /app/patch-train.py
+COPY docker/agent_loop.py /app/agent_loop.py
 
 # ── Runtime defaults ───────────────────────────────────────────────────────────
 ENV DATASET_HF_REPO=roneneldan/TinyStories \

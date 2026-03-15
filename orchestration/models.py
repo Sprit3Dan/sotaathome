@@ -171,6 +171,7 @@ class AutoresearchJobRequest(BaseModel):
     m: int = Field(default=10, ge=1)
     t: int = Field(default=300, ge=30)
     generations: int = Field(default=1, ge=1)
+    agent_script: Optional[str] = None
     # Populated internally on re-submission:
     generation_num: int = 1
     parent_candidate_ids: list[str] = []

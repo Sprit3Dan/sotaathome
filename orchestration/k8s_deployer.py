@@ -103,6 +103,16 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
                 )
             ),
         ),
+        client.V1EnvVar(
+            name="OPENAI_API_KEY",
+            value_from=client.V1EnvVarSource(
+                secret_key_ref=client.V1SecretKeySelector(
+                    name="orchestrator-secrets",
+                    key="OPENAI_API_KEY",
+                )
+            ),
+        ),
+        client.V1EnvVar(name="OPENAI_MODEL", value=settings.OPENAI_MODEL),
     ]
     for k, v in init_spec.env.items():
         env_vars.append(client.V1EnvVar(name=k, value=str(v)))
