@@ -8,7 +8,9 @@ from uuid import uuid4
 import boto3
 import redis
 from agent import generate_init_container_spec
+from botocore.exceptions import ClientError
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from k8s_deployer import deploy_research_job, list_jobs, list_nodes
 from models import AutoresearchJobRequest, GitHubResearchItem, InitContainerSpec, ResearchItem, TaskStatusUpdate, parse_research_item
 from settings import settings
@@ -258,6 +260,24 @@ def cluster_status():
 
         tasks.sort(key=lambda item: item["task_id"])
 
+        generations = []
+        for key in redis_client.scan_iter("generation:*"):
+            gen_id_val = key.split(":", 1)[1]
+            gen_data = redis_client.hgetall(key)
+            if gen_data:
+                best_bpb_raw = gen_data.get("best_val_bpb")
+                generations.append({
+                    "gen_id": gen_id_val,
+                    "generation_num": gen_data.get("generation_num", "?"),
+                    "total_generations": gen_data.get("total_generations", "?"),
+                    "status": gen_data.get("status", ""),
+                    "pods_done": gen_data.get("pods_done", "0"),
+                    "expected_pods": gen_data.get("expected_pods", "?"),
+                    "best_val_bpb": float(best_bpb_raw) if best_bpb_raw else None,
+                    "best_run_id": gen_data.get("best_run_id"),
+                })
+        generations.sort(key=lambda g: g["gen_id"])
+
         jobs = list_jobs()
         try:
             nodes = list_nodes()
@@ -271,6 +291,7 @@ def cluster_status():
             "tasks": tasks,
             "jobs": jobs,
             "nodes": nodes,
+            "generations": generations,
         }
     except Exception as e:
         logger.error(f"Failed to get cluster status: {e}")
@@ -417,6 +438,30 @@ def submit_job(req: AutoresearchJobRequest):
     except Exception as e:
         logger.exception(f"Failed to submit job: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/generation/{gen_id}/train/{run_id}")
+def get_train_script(gen_id: str, run_id: str):
+    """Return the final train.py for a completed run as plain text."""
+    try:
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=settings.S3_ENDPOINT_URL,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+        )
+        key = f"generations/{gen_id}/{run_id}/train.py"
+        try:
+            obj = s3.get_object(Bucket="runs", Key=key)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "NoSuchKey":
+                raise HTTPException(status_code=404, detail=f"Not found: {key}")
+            raise
+        return Response(content=obj["Body"].read(), media_type="text/plain")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 if __name__ == "__main__":

@@ -105,7 +105,16 @@ def _run_evaluation(s3, gen_id: str) -> List[Dict]:
         d["metric_value"] = metric_by_candidate.get(job.parent_candidate_id)
         enriched.append(d)
 
-    return enriched
+    # Compute generation-level best
+    best_val_bpb_gen: float | None = None
+    best_run_id_gen: str | None = None
+    for r in runs:
+        val = r.run_primary_metric_value
+        if best_val_bpb_gen is None or val < best_val_bpb_gen:
+            best_val_bpb_gen = val
+            best_run_id_gen = r.run_id
+
+    return enriched, best_val_bpb_gen, best_run_id_gen
 
 
 # ── Per-generation processing ─────────────────────────────────────────────────
@@ -121,18 +130,25 @@ def _process_generation(r: redis.Redis, s3, gen_id: str) -> None:
     logger.debug(f"[watcher] gen={gen_id} completed={completed}/{expected_pods}")
 
     if completed < expected_pods:
+        r.hset(gen_key, "pods_done", str(completed))
         return
 
     logger.info(f"[watcher] gen={gen_id} all {completed} pods done. Starting evaluation.")
     r.hset(gen_key, "status", "evaluating")
 
     try:
-        next_jobs = _run_evaluation(s3, gen_id)
+        next_jobs, best_val_bpb, best_run_id = _run_evaluation(s3, gen_id)
     except Exception as exc:
         logger.exception(f"[watcher] Evaluation failed for gen {gen_id}: {exc}")
         r.hset(gen_key, "status", "eval_failed")
         return
 
+    eval_fields: dict = {"pods_done": str(completed)}
+    if best_val_bpb is not None:
+        eval_fields["best_val_bpb"] = str(best_val_bpb)
+    if best_run_id is not None:
+        eval_fields["best_run_id"] = best_run_id
+    r.hset(gen_key, mapping=eval_fields)
     r.hset(gen_key, "status", "evaluated")
     logger.info(f"[watcher] gen={gen_id} evaluated. next_jobs={len(next_jobs)}")
 

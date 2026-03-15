@@ -244,6 +244,35 @@ def build_nodes_table(nodes: list[dict[str, Any]]) -> Table:
     return table
 
 
+def build_generations_table(generations: list[dict]) -> Table:
+    table = Table(expand=True)
+    table.add_column("Gen ID",    style="cyan",     no_wrap=True)
+    table.add_column("Num/Total", style="green",    no_wrap=True)
+    table.add_column("Status",    style="magenta",  no_wrap=True)
+    table.add_column("Pods",      style="yellow",   no_wrap=True, justify="right")
+    table.add_column("Best BPB",  style="white",    no_wrap=True, justify="right")
+    table.add_column("Best Run",  style="dim cyan", no_wrap=True)
+    for gen in generations[:MAX_ROWS]:
+        status = str(gen.get("status", ""))
+        if status in ("done", "evaluated", "next_gen_submitted"):
+            status_fmt = f"🦀🏆 {status}"
+        elif "fail" in status or "error" in status:
+            status_fmt = f"🦀💀 {status}"
+        else:
+            status_fmt = f"🦀 {status}"
+        bpb = gen.get("best_val_bpb")
+        best_run = gen.get("best_run_id") or "—"
+        table.add_row(
+            str(gen.get("gen_id", ""))[:8],
+            f"{gen.get('generation_num','?')}/{gen.get('total_generations','?')}",
+            status_fmt,
+            f"{gen.get('pods_done','0')}/{gen.get('expected_pods','?')}",
+            f"{bpb:.4f}" if bpb is not None else "—",
+            best_run[:8] if best_run != "—" else "—",
+        )
+    return table
+
+
 def build_error_panel(data: dict[str, Any]) -> Panel:
     message = data.get("detail") or "Unknown error"
     path = data.get("path", "")
@@ -296,12 +325,17 @@ def build_layout(data: dict[str, Any], tick: int, form: SubmitFormState):
         Layout(name="tasks", ratio=2),
         Layout(name="jobs", ratio=1),
     )
+    layout["bottom"].split_row(
+        Layout(name="generations", ratio=2),
+        Layout(name="nodes", ratio=1),
+    )
 
     layout["banner"].update(build_banner(tick))
     layout["top"].update(build_summary(data))
     layout["tasks"].update(Panel(build_tasks_table(data.get("tasks", [])), title="🦀 Tasks"))
     layout["jobs"].update(Panel(build_jobs_table(data.get("jobs", [])), title="🦀 Jobs"))
-    layout["bottom"].update(Panel(build_nodes_table(data.get("nodes", [])), title="🦀 Nodes"))
+    layout["generations"].update(Panel(build_generations_table(data.get("generations", [])), title="🦀 Generations"))
+    layout["nodes"].update(Panel(build_nodes_table(data.get("nodes", [])), title="🦀 Nodes"))
     layout["submit"].update(build_submit_panel(form))
     layout["footer"].update(build_footer(tick))
 

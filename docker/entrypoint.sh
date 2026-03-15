@@ -272,6 +272,13 @@ lineage_doc = {
 }
 (artifact_dir / "lineage.json").write_text(json.dumps(lineage_doc, indent=2))
 
+# Copy final train.py into artifact dir for upload
+workspace_dir = Path("/workspace") / run_id
+train_src = workspace_dir / "train.py"
+if train_src.exists():
+    import shutil
+    shutil.copy2(str(train_src), str(artifact_dir / "train.py"))
+
 print(f"[entrypoint] Artifact contract written to {artifact_dir}")
 print(f"[entrypoint] val_bpb={best_val_bpb}  elapsed={elapsed_s}s  gen={gen_id}")
 
