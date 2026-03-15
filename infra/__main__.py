@@ -260,11 +260,28 @@ def create_orchestrator():
                                 {"name": "K8S_NAMESPACE", "value": k8s_namespace},
                                 {"name": "MAX_RETRIES", "value": max_retries},
                                 {"name": "POLL_INTERVAL", "value": poll_interval},
-                                {"name": "MINIO_ENDPOINT", "value": "minio:9000"},
+                                {"name": "S3_ENDPOINT_URL", "value": "http://minio:9000"},
+                                {
+                                    "name": "S3_ACCESS_KEY",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": "minio-credentials",
+                                            "key": "MINIO_ACCESS_KEY",
+                                        }
+                                    },
+                                },
+                                {
+                                    "name": "S3_SECRET_KEY",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": "minio-credentials",
+                                            "key": "MINIO_SECRET_KEY",
+                                        }
+                                    },
+                                },
                                 {"name": "LOG_LEVEL", "value": log_level},
                             ],
                             "envFrom": [
-                                {"secretRef": {"name": "minio-credentials"}},
                                 {"secretRef": {"name": "orchestrator-secrets"}},
                             ],
                             "ports": [{"containerPort": 8000}],
