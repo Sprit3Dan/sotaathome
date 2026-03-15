@@ -1,12 +1,27 @@
-import os
 import uuid
-from kubernetes import client, config
-from models import ResearchItem, InitContainerSpec
-from settings import settings
 import time
 import logging
+from kubernetes import client, config
+from models import (
+    ResearchItem,
+    InitContainerSpec,
+    GitHubResearchItem,
+    HuggingFaceResearchItem,
+)
+from settings import settings
+
+REPO_VOLUME_NAME = "repo-volume"
+REPO_ARCHIVE_DIR = "/tmp/repo-archive"
 
 logger = logging.getLogger(__name__)
+
+
+def _repo_mount_path(task: ResearchItem) -> str:
+    return getattr(task, "repo_mount_path", settings.REPO_MOUNT_PATH)
+
+
+def _repo_path_env_var(task: ResearchItem) -> str:
+    return getattr(task, "repo_path_env_var", settings.REPO_PATH_ENV_VAR)
 
 def get_k8s_client():
     """
@@ -25,6 +40,51 @@ def get_k8s_client():
             logger.debug("Loading default local Kubernetes config (~/.kube/config).")
             config.load_kube_config()
     return client.CoreV1Api()
+
+
+def _github_archive_url(task: GitHubResearchItem) -> str:
+    ref = task.commit_sha or task.base_branch
+    repo = task.github_repo_slug
+    return f"https://api.github.com/repos/{repo}/tarball/{ref}"
+
+
+def _hf_snapshot_url(task: HuggingFaceResearchItem) -> str:
+    return f"https://huggingface.co/api/{task.hf_repo_type}s/{task.hf_repo}/snapshot/{task.revision}"
+
+
+def _repo_download_headers(task: ResearchItem) -> list[str]:
+    headers = []
+    if isinstance(task, GitHubResearchItem) and settings.GITHUB_TOKEN:
+        headers.append(f"Authorization: Bearer {settings.GITHUB_TOKEN}")
+    if isinstance(task, HuggingFaceResearchItem) and settings.HF_TOKEN:
+        headers.append(f"Authorization: Bearer {settings.HF_TOKEN}")
+    return headers
+
+
+def _repo_download_url(task: ResearchItem) -> str:
+    if isinstance(task, GitHubResearchItem):
+        return _github_archive_url(task)
+    if isinstance(task, HuggingFaceResearchItem):
+        return _hf_snapshot_url(task)
+    raise ValueError(f"Unsupported research item type: {type(task)}")
+
+
+def _repo_sync_script(task: ResearchItem) -> str:
+    repo_path = _repo_mount_path(task)
+    archive_url = _repo_download_url(task)
+    curl_headers = " ".join(
+        f"-H {header!r}" for header in _repo_download_headers(task)
+    )
+    return f"""
+set -euo pipefail
+mkdir -p {REPO_ARCHIVE_DIR} {repo_path}
+rm -rf {REPO_ARCHIVE_DIR}/* {repo_path:?}/*
+curl -L {curl_headers} {archive_url!r} -o {REPO_ARCHIVE_DIR}/repo.tar
+tar -xf {REPO_ARCHIVE_DIR}/repo.tar -C {REPO_ARCHIVE_DIR}
+src_dir="$(find {REPO_ARCHIVE_DIR} -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+cp -a "$src_dir"/. {repo_path}/
+chmod -R u+rwX,g+rwX,o+rwX {repo_path}
+""".strip()
 
 
 def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dict:
@@ -69,6 +129,32 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
     for k, v in init_spec.env.items():
         env_vars.append(client.V1EnvVar(name=k, value=str(v)))
 
+    repo_mount_path = _repo_mount_path(task)
+    repo_path_env_var = _repo_path_env_var(task)
+
+    init_volume_mounts.append(
+        client.V1VolumeMount(
+            name=REPO_VOLUME_NAME,
+            mount_path=repo_mount_path,
+            read_only=False,
+        )
+    )
+    env_vars.append(client.V1EnvVar(name=repo_path_env_var, value=repo_mount_path))
+
+    repo_sync_container = client.V1Container(
+        name="fetch-repository",
+        image="curlimages/curl:8.7.1",
+        command=["/bin/sh", "-c"],
+        args=[_repo_sync_script(task)],
+        volume_mounts=[
+            client.V1VolumeMount(
+                name=REPO_VOLUME_NAME,
+                mount_path=repo_mount_path,
+                read_only=False,
+            )
+        ],
+    )
+
     # 3. Define the Init Container
     init_container = client.V1Container(
         name="setup-dependencies",
@@ -85,13 +171,17 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
     main_mount_path = init_volume_mounts[0].mount_path if init_volume_mounts else "/workspace"
     main_container = client.V1Container(
         name="training-loop",
-        image="pytorch/pytorch:latest", # Can be parameterized later
-        command=["/bin/sh", "-c"],
-        args=[f"echo 'Running research task: {task.research_direction}'; ls -la {main_mount_path}"],
+        image="ghcr.io/sprit3dan/sotaathome:latest",
+        env=[client.V1EnvVar(name=repo_path_env_var, value=repo_mount_path)],
         volume_mounts=[
             client.V1VolumeMount(
                 name="workspace-volume",
                 mount_path=main_mount_path
+            ),
+            client.V1VolumeMount(
+                name=REPO_VOLUME_NAME,
+                mount_path=repo_mount_path,
+                read_only=False,
             )
         ],
         # Example of requesting GPU resources for heterogeneous massive execution
@@ -118,9 +208,13 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
                     persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
                         claim_name=pvc_name
                     )
+                ),
+                client.V1Volume(
+                    name=REPO_VOLUME_NAME,
+                    empty_dir=client.V1EmptyDirVolumeSource(),
                 )
             ],
-            init_containers=[init_container],
+            init_containers=[repo_sync_container, init_container],
             containers=[main_container]
         )
     )

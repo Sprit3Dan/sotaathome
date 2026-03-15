@@ -27,6 +27,8 @@ class Settings:
     # API Tokens for repository access
     GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
     HF_TOKEN = os.getenv("HF_TOKEN")
+    REPO_MOUNT_PATH = os.getenv("REPO_MOUNT_PATH", "/repo")
+    REPO_PATH_ENV_VAR = os.getenv("REPO_PATH_ENV_VAR", "REPO_PATH")
 
     # Logging Settings
     LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG")

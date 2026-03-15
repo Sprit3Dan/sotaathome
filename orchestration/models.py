@@ -1,5 +1,6 @@
 import uuid
 from typing import Optional, Union, Annotated, Literal
+from urllib.parse import urlparse
 from pydantic import BaseModel, Field, TypeAdapter
 
 
@@ -69,6 +70,18 @@ class ResearchItemBase(BaseModel):
     def repo_ref(self) -> str:
         raise NotImplementedError
 
+    @property
+    def repo_mount_name(self) -> str:
+        return "repo-volume"
+
+    @property
+    def repo_mount_path(self) -> str:
+        return "/repo"
+
+    @property
+    def repo_path_env_var(self) -> str:
+        return "REPO_PATH"
+
 
 class GitHubResearchItem(ResearchItemBase):
     """
@@ -92,6 +105,17 @@ class GitHubResearchItem(ResearchItemBase):
     def repo_ref(self) -> str:
         return self.github_repo
 
+    @property
+    def github_repo_slug(self) -> str:
+        value = self.github_repo.strip()
+        if value.startswith("http://") or value.startswith("https://"):
+            parsed = urlparse(value)
+            path = parsed.path.strip("/")
+            if path.endswith(".git"):
+                path = path[:-4]
+            return path
+        return value
+
 
 class HuggingFaceResearchItem(ResearchItemBase):
     """
@@ -114,6 +138,10 @@ class HuggingFaceResearchItem(ResearchItemBase):
     @property
     def repo_ref(self) -> str:
         return self.hf_repo
+
+    @property
+    def hf_snapshot_path(self) -> str:
+        return f"{self.hf_repo_type}s/{self.hf_repo}@{self.revision}"
 
 
 ResearchItem = Annotated[
