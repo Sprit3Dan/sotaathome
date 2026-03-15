@@ -133,10 +133,10 @@ def main():
         (workspace / "train.py").write_text(new_code)
 
         try:
-            exit_code, output = run_train(workspace, timeout=time_budget + 120)
+            exit_code, output = run_train(workspace, timeout=time_budget + 240)
         except subprocess.TimeoutExpired:
             exit_code = -1
-            output = f"TimeoutExpired after {time_budget * 2}s"
+            output = f"TimeoutExpired after {time_budget + 240}s"
 
         iter_log.write_text(output)
         log(f"train.py exited {exit_code}, log -> {iter_log}")
