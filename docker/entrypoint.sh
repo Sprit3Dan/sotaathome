@@ -70,24 +70,20 @@ DATASET_DATA_DIR="${AR_CACHE}/${DATASET_SLUG}/data"
 DATASET_TOKENIZER_DIR="${AR_CACHE}/${DATASET_SLUG}/tokenizer"
 mkdir -p "${DATASET_DATA_DIR}" "${DATASET_TOKENIZER_DIR}"
 
-# Data symlink
-if [[ -L "${AR_CACHE}/data" ]]; then
-    rm "${AR_CACHE}/data"
-elif [[ -d "${AR_CACHE}/data" ]]; then
+# Data symlink (ln -sf is atomic enough to avoid race with parallel pods)
+if [[ -d "${AR_CACHE}/data" && ! -L "${AR_CACHE}/data" ]]; then
     log "WARNING: ${AR_CACHE}/data is a real directory; backing up as data.bak"
     mv "${AR_CACHE}/data" "${AR_CACHE}/data.bak" || true
 fi
-ln -s "${DATASET_DATA_DIR}" "${AR_CACHE}/data"
+ln -sf "${DATASET_DATA_DIR}" "${AR_CACHE}/data"
 log "Symlinked ${AR_CACHE}/data → ${DATASET_DATA_DIR}"
 
-# Tokenizer symlink
-if [[ -L "${AR_CACHE}/tokenizer" ]]; then
-    rm "${AR_CACHE}/tokenizer"
-elif [[ -d "${AR_CACHE}/tokenizer" ]]; then
+# Tokenizer symlink (ln -sf is atomic enough to avoid race with parallel pods)
+if [[ -d "${AR_CACHE}/tokenizer" && ! -L "${AR_CACHE}/tokenizer" ]]; then
     log "WARNING: ${AR_CACHE}/tokenizer is a real directory; backing up as tokenizer.bak"
     mv "${AR_CACHE}/tokenizer" "${AR_CACHE}/tokenizer.bak" || true
 fi
-ln -s "${DATASET_TOKENIZER_DIR}" "${AR_CACHE}/tokenizer"
+ln -sf "${DATASET_TOKENIZER_DIR}" "${AR_CACHE}/tokenizer"
 log "Symlinked ${AR_CACHE}/tokenizer → ${DATASET_TOKENIZER_DIR}"
 
 # ── 5. Tokenizer training (autoresearch prepare.py) ───────────────────────────
