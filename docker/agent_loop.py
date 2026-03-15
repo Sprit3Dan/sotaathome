@@ -71,6 +71,11 @@ def main():
     openai_client = OpenAI()
     model = os.environ.get("OPENAI_MODEL", "gpt-5.4")
 
+    parent_val_bpb_str = os.environ.get("AUTORESEARCH_PARENT_METRIC_VALUE", "")
+    parent_val_bpb: float | None = float(parent_val_bpb_str) if parent_val_bpb_str else None
+    if parent_val_bpb is not None:
+        log(f"Parent val_bpb to beat: {parent_val_bpb}")
+
     system_prompt = (workspace / "program.md").read_text()
 
     history: list[dict] = []
@@ -91,9 +96,12 @@ def main():
             else:
                 history_lines.append(f"iter {h['iteration']}: val_bpb={h.get('val_bpb', 'N/A')}")
 
-        user_msg = f"Iteration {i}/{max_iters}.\n\nCurrent train.py:\n```python\n{current_code}\n```\n"
+        user_msg = f"Iteration {i}/{max_iters}.\n\n"
+        if parent_val_bpb is not None:
+            user_msg += f"Target to beat: the parent generation achieved val_bpb={parent_val_bpb}. You must go lower.\n\n"
+        user_msg += f"Current train.py:\n```python\n{current_code}\n```\n"
         if history_lines:
-            user_msg += "\nPrevious results:\n" + "\n".join(history_lines) + "\n"
+            user_msg += "\nPrevious results this run:\n" + "\n".join(history_lines) + "\n"
         user_msg += "\nPropose a new train.py that achieves lower val_bpb."
 
         messages = [
