@@ -133,7 +133,7 @@ def main():
         (workspace / "train.py").write_text(new_code)
 
         try:
-            exit_code, output = run_train(workspace, timeout=time_budget * 2)
+            exit_code, output = run_train(workspace, timeout=time_budget + 120)
         except subprocess.TimeoutExpired:
             exit_code = -1
             output = f"TimeoutExpired after {time_budget * 2}s"

@@ -138,6 +138,12 @@ sed -i "s/^DEVICE_BATCH_SIZE = [0-9]\+/DEVICE_BATCH_SIZE = ${DEVICE_BATCH_SIZE}/
 grep -qE "^DEVICE_BATCH_SIZE = ${DEVICE_BATCH_SIZE}( |$)" "${WORKSPACE}/train.py" \
     || die "DEVICE_BATCH_SIZE patch failed — check train.py format"
 
+# Patch TIME_BUDGET in workspace prepare.py so train.py respects the per-run time budget
+log "Patching TIME_BUDGET=${TIME_BUDGET_SECS} in workspace prepare.py ..."
+sed -i "s/^TIME_BUDGET = [0-9]\+/TIME_BUDGET = ${TIME_BUDGET_SECS}/" "${WORKSPACE}/prepare.py"
+grep -qE "^TIME_BUDGET = ${TIME_BUDGET_SECS}( |$)" "${WORKSPACE}/prepare.py" \
+    || die "TIME_BUDGET patch failed — check that prepare.py contains a line 'TIME_BUDGET = <N>'"
+
 log "Patches verified."
 
 # Apply FA3 → SDPA fallback patch (safe no-op on Ampere/Hopper)
