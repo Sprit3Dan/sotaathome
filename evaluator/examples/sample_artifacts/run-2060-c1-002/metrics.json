@@ -1,0 +1,10 @@
+{
+  "primary_metric": {
+    "name": "val_bpb",
+    "direction": "min",
+    "value": 1.494
+  },
+  "secondary_metrics": {
+    "train_loss": 2.09
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "run_id": "run-3090-d1-001",
+  "candidate_id": "cand-3090-d1",
+  "agent_id": "agent-d",
+  "worker_id": "worker-3090-a",
+  "resource_class": "3090-24gb",
+  "model_family": "gpt2-medium",
+  "task_type": "tinystories",
+  "seed": 10,
+  "status": "completed",
+  "training_budget": {
+    "target_steps": 1200,
+    "normalized_budget_units": 1.0,
+    "max_wall_clock_seconds": 300
+  },
+  "wall_clock_used_seconds": 288,
+  "created_at": "2026-03-12T10:00:00Z",
+  "completed_at": "2026-03-12T10:05:00Z"
+}

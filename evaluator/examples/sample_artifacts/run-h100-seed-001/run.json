@@ -1,0 +1,19 @@
+{
+  "run_id": "run-h100-seed-001",
+  "candidate_id": "cand-h100-seed-a",
+  "agent_id": "agent-seed",
+  "worker_id": "worker-h100-a",
+  "resource_class": "H100-80gb",
+  "model_family": "gpt2-large",
+  "task_type": "tinystories",
+  "seed": 1,
+  "status": "completed",
+  "training_budget": {
+    "target_steps": 1500,
+    "normalized_budget_units": 1.0,
+    "max_wall_clock_seconds": 300
+  },
+  "wall_clock_used_seconds": 298,
+  "created_at": "2026-03-12T12:00:00Z",
+  "completed_at": "2026-03-12T12:05:00Z"
+}

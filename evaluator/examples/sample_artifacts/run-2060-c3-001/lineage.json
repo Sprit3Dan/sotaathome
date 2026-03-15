@@ -1,0 +1,6 @@
+{
+  "candidate_id": "cand-2060-c3",
+  "parent_candidate_id": "parent-2060-base",
+  "parent_primary_metric_value": 1.5,
+  "mutation_type": "patch"
+}

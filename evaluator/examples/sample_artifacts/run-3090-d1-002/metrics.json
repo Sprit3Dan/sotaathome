@@ -1,0 +1,7 @@
+{
+  "primary_metric": {
+    "name": "val_bpb",
+    "direction": "min",
+    "value": 1.3975
+  }
+}

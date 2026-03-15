@@ -1,0 +1,6 @@
+{
+  "candidate_id": "cand-h100-seed-a",
+  "is_seed_run": true,
+  "parent_candidate_id": null,
+  "mutation_type": "baseline"
+}

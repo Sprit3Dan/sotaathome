@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sotaathome-train-001
+spec:
+  ttlSecondsAfterFinished: 3600
+  activeDeadlineSeconds: 14400
+  backoffLimit: 2
+  template:
+    spec:
+      nodeName: turtle
+      runtimeClassName: nvidia
+      restartPolicy: Never
+      dnsPolicy: None
+      dnsConfig:
+        nameservers:
+          - 8.8.8.8
+          - 8.8.4.4
+      imagePullSecrets:
+        - name: ghcr-secret
+      containers:
+        - name: train
+          image: ghcr.io/sprit3dan/sotaathome:latest
+          env:
+            - name: AUTORESEARCH_RUN_ID
+              value: "k3s-test-001"
+            - name: AUTORESEARCH_MAX_ITERATIONS
+              value: "2"
+            - name: AUTORESEARCH_NUM_SHARDS
+              value: "2"
+            - name: DEPTH
+              value: "4"
+            - name: DEVICE_BATCH_SIZE
+              value: "8"
+            - name: HF_HOME
+              value: "/artifacts/cache/huggingface"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: cache
+              mountPath: /artifacts/cache
+            - name: output
+              mountPath: /artifacts/output
+      volumes:
+        - name: cache
+          hostPath:
+            path: /root/hackathon/cache
+            type: DirectoryOrCreate
+        - name: output
+          hostPath:
+            path: /root/hackathon/output
+            type: DirectoryOrCreate

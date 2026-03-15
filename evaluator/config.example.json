@@ -1,0 +1,16 @@
+{
+  "bronze_min_delta": 0.001,
+  "silver_min_runs": 2,
+  "silver_min_distinct_workers": 2,
+  "gold_min_runs": 3,
+  "gold_min_distinct_workers": 2,
+  "gold_min_mean_delta": 0.001,
+  "near_miss_delta": 0.0005,
+  "diversity_slots": 2,
+  "budget_overrun_tolerance": 1.1,
+  "metric_normalization_epsilon": 0.001,
+  "jobs_per_resource_class": 10,
+  "exploit_ratio": 0.7,
+  "explore_ratio": 0.2,
+  "verify_ratio": 0.1
+}

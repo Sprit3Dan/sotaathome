@@ -1,0 +1,19 @@
+{
+  "run_id": "run-2060-c3-001",
+  "candidate_id": "cand-2060-c3",
+  "agent_id": "agent-z",
+  "worker_id": "worker-2060-z",
+  "resource_class": "2060-12gb",
+  "model_family": "gpt2-small",
+  "task_type": "tinystories",
+  "seed": 999,
+  "status": "failed",
+  "training_budget": {
+    "target_steps": 1000,
+    "normalized_budget_units": 1.0,
+    "max_wall_clock_seconds": 300
+  },
+  "wall_clock_used_seconds": 300,
+  "created_at": "2026-03-11T18:00:00Z",
+  "completed_at": "2026-03-11T18:05:00Z"
+}
