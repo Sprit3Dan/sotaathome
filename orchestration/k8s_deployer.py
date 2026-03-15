@@ -60,6 +60,11 @@ def list_nodes() -> list[dict]:
         {
             "name": node.metadata.name,
             "labels": node.metadata.labels or {},
+            "capacity": dict(node.status.capacity or {}),
+            "allocatable": dict(node.status.allocatable or {}),
+            "runtime_handlers": [
+                handler.name for handler in (node.status.runtime_handlers or [])
+            ],
         }
         for node in nodes
     ]

@@ -130,11 +130,25 @@ def build_nodes_table(nodes: list[dict[str, Any]]) -> Table:
 
     for node in nodes[:MAX_ROWS]:
         labels = node.get("labels", {}) or {}
-        has_gpu = "🦀 yes" if "nvidia.com/gpu.present" in labels else "🦀 no"
+        allocatable = node.get("allocatable", {}) or {}
+        runtime_handlers = node.get("runtime_handlers", []) or []
+        gpu_count = allocatable.get("nvidia.com/gpu", "0")
+        has_gpu = str(gpu_count) not in ("0", "", "None")
+        has_nvidia_runtime = "nvidia" in runtime_handlers
+
+        if has_gpu and has_nvidia_runtime:
+            gpu_runtime = f"🦀 yes ({gpu_count} GPU, nvidia)"
+        elif has_gpu:
+            gpu_runtime = f"🦀 yes ({gpu_count} GPU)"
+        elif has_nvidia_runtime:
+            gpu_runtime = "🦀 runtime only"
+        else:
+            gpu_runtime = "🦀 no"
+
         label_text = ", ".join(sorted(list(labels.keys())[:6]))
         table.add_row(
             f"🦀 {str(node.get('name', ''))}",
-            has_gpu,
+            gpu_runtime,
             label_text,
         )
     return table
