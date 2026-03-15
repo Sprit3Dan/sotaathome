@@ -1,5 +1,7 @@
 # Promotion Policy (v0)
 
+![Evaluator Pipeline](evaluator-pipeline.png)
+
 Promotions are decided per `resource_class`. Results are not merged into one global leaderboard.
 
 ## Primary grading axis
