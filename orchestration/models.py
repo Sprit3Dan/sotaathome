@@ -65,6 +65,11 @@ class ResearchItemBase(BaseModel):
         default=None,
         description="A pre-built init container spec. When provided, LLM-based analysis is skipped entirely."
     )
+    job_count: int = Field(
+        default=1,
+        ge=1,
+        description="Number of Kubernetes jobs or parallel task runs to start for this research item."
+    )
 
     @property
     def repo_ref(self) -> str:
