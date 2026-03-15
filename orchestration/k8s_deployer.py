@@ -84,6 +84,11 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
     env_vars = [
         client.V1EnvVar(name="CUDA_VISIBLE_DEVICES", value="0"),
         client.V1EnvVar(name="AUTORESEARCH_RUN_ID", value=run_id),
+        client.V1EnvVar(name="AUTORESEARCH_CACHE_DIR", value=CACHE_MOUNT_PATH),
+        client.V1EnvVar(name="AUTORESEARCH_OUTPUT_DIR", value=OUTPUT_MOUNT_PATH),
+        client.V1EnvVar(name="AUTORESEARCH_NUM_SHARDS", value="2"),
+        client.V1EnvVar(name="DEPTH", value="4"),
+        client.V1EnvVar(name="DEVICE_BATCH_SIZE", value="8"),
         client.V1EnvVar(name="S3_ENDPOINT_URL", value=settings.S3_ENDPOINT_URL),
         client.V1EnvVar(
             name="S3_ACCESS_KEY",
