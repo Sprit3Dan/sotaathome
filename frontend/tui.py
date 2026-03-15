@@ -8,11 +8,23 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
+from rich.text import Text
 
 
-QUEUE_URL = os.getenv("QUEUE_URL", "http://orchestrator:8000")
+QUEUE_URL = os.getenv("QUEUE_URL", "http://127.0.0.1:8000")
 REFRESH_SECONDS = float(os.getenv("TUI_REFRESH_SECONDS", "2"))
 MAX_ROWS = int(os.getenv("TUI_MAX_ROWS", "12"))
+CRAB_FRAMES = [
+    "🦀      🦀🦀      🦀",
+    "  🦀  🦀✨🦀  🦀  ",
+    "🦀✨   CRAB CTRL   ✨🦀",
+    "  🦀  🦀🔥🦀  🦀  ",
+]
+FOOTER_FRAMES = [
+    "🦀 queue crab rave 🦀 jobs crab rave 🦀 node crab rave 🦀",
+    "✨🦀 deploy crabs thriving across the cluster 🦀✨",
+    "🦀 status: maximum crab energy detected 🦀",
+]
 
 console = Console()
 
@@ -27,6 +39,18 @@ def fetch_json(path: str) -> dict[str, Any]:
         return {"status": "error", "detail": str(exc), "path": path}
 
 
+def crab_status(label: str, value: int, good: str = "🦀 thriving", bad: str = "🦀💀 trouble") -> str:
+    mood = good if value == 0 else bad
+    return f"[bold]{label}:[/bold] {value}  {mood}"
+
+
+def build_banner(tick: int) -> Panel:
+    frame = CRAB_FRAMES[tick % len(CRAB_FRAMES)]
+    title = Text("🦀 CLUSTER CRAB CONTROL CENTER 🦀", style="bold magenta")
+    body = Text(frame, style="bold cyan", justify="center")
+    return Panel(body, title=title, border_style="bright_magenta")
+
+
 def build_summary(data: dict[str, Any]) -> Panel:
     queue_length = data.get("queue_length", 0)
     jobs = data.get("jobs", [])
@@ -38,15 +62,15 @@ def build_summary(data: dict[str, Any]) -> Panel:
     succeeded_jobs = sum(job.get("succeeded", 0) for job in jobs)
 
     lines = [
-        f"[bold]Queue:[/bold] {queue_length}",
-        f"[bold]Tasks tracked:[/bold] {len(tasks)}",
-        f"[bold]Jobs:[/bold] {len(jobs)}",
-        f"[bold]Nodes:[/bold] {len(nodes)}",
-        f"[bold]Active jobs:[/bold] {active_jobs}",
-        f"[bold]Succeeded jobs:[/bold] {succeeded_jobs}",
-        f"[bold]Failed jobs:[/bold] {failed_jobs}",
+        crab_status("Queue", queue_length, "🦀 humming", "🦀✨ packed"),
+        f"[bold]Tasks tracked:[/bold] {len(tasks)}  🦀",
+        f"[bold]Jobs:[/bold] {len(jobs)}  🦀🦀",
+        f"[bold]Nodes:[/bold] {len(nodes)}  🦀🖥️",
+        crab_status("Active jobs", active_jobs, "🦀 chill", "🦀⚙️ busy"),
+        crab_status("Succeeded jobs", succeeded_jobs, "🦀 awaiting glory", "🦀🏆 winning"),
+        crab_status("Failed jobs", failed_jobs, "🦀 immaculate", "🦀🔥 burning"),
     ]
-    return Panel(Group(*lines), title="Overview", border_style="cyan")
+    return Panel(Group(*lines), title="🦀 Overview", border_style="cyan")
 
 
 def build_tasks_table(tasks: list[dict[str, Any]]) -> Table:
@@ -58,9 +82,17 @@ def build_tasks_table(tasks: list[dict[str, Any]]) -> Table:
     table.add_column("Pod", style="yellow")
 
     for task in tasks[:MAX_ROWS]:
+        status = str(task.get("status", ""))
+        if "success" in status:
+            status = f"🦀🏆 {status}"
+        elif "fail" in status or "error" in status:
+            status = f"🦀💀 {status}"
+        elif status:
+            status = f"🦀 {status}"
+
         table.add_row(
             str(task.get("task_id", "")),
-            str(task.get("status", "")),
+            status,
             str(task.get("repo_ref", "")),
             str(task.get("research_direction", "")),
             str(task.get("pod_name", "")),
@@ -77,12 +109,15 @@ def build_jobs_table(jobs: list[dict[str, Any]]) -> Table:
     table.add_column("Failed", justify="right")
 
     for job in jobs[:MAX_ROWS]:
+        failed = int(job.get("failed", 0))
+        active = int(job.get("active", 0))
+        vibe = "🦀🔥" if failed else "🦀⚙️" if active else "🦀"
         table.add_row(
-            str(job.get("name", "")),
+            f"{vibe} {str(job.get('name', ''))}",
             str(job.get("namespace", "")),
-            str(job.get("active", 0)),
+            str(active),
             str(job.get("succeeded", 0)),
-            str(job.get("failed", 0)),
+            str(failed),
         )
     return table
 
@@ -95,10 +130,10 @@ def build_nodes_table(nodes: list[dict[str, Any]]) -> Table:
 
     for node in nodes[:MAX_ROWS]:
         labels = node.get("labels", {}) or {}
-        has_gpu = "yes" if "nvidia.com/gpu.present" in labels else "no"
+        has_gpu = "🦀 yes" if "nvidia.com/gpu.present" in labels else "🦀 no"
         label_text = ", ".join(sorted(list(labels.keys())[:6]))
         table.add_row(
-            str(node.get("name", "")),
+            f"🦀 {str(node.get('name', ''))}",
             has_gpu,
             label_text,
         )
@@ -119,46 +154,57 @@ def build_error_panel(data: dict[str, Any]) -> Panel:
     )
 
 
-def build_layout(data: dict[str, Any]):
+def build_footer(tick: int) -> Panel:
+    frame = FOOTER_FRAMES[tick % len(FOOTER_FRAMES)]
+    return Panel(frame, title="🦀 Hype Feed", border_style="bright_blue")
+
+
+def build_layout(data: dict[str, Any], tick: int):
     if data.get("status") != "success":
         return build_error_panel(data)
 
     layout = Layout()
     layout.split_column(
+        Layout(name="banner", size=3),
         Layout(name="top", size=9),
         Layout(name="middle", ratio=2),
         Layout(name="bottom", ratio=2),
+        Layout(name="footer", size=3),
     )
     layout["middle"].split_row(
         Layout(name="tasks", ratio=2),
         Layout(name="jobs", ratio=1),
     )
 
+    layout["banner"].update(build_banner(tick))
     layout["top"].update(build_summary(data))
-    layout["tasks"].update(Panel(build_tasks_table(data.get("tasks", [])), title="Tasks"))
-    layout["jobs"].update(Panel(build_jobs_table(data.get("jobs", [])), title="Jobs"))
-    layout["bottom"].update(Panel(build_nodes_table(data.get("nodes", [])), title="Nodes"))
+    layout["tasks"].update(Panel(build_tasks_table(data.get("tasks", [])), title="🦀 Tasks"))
+    layout["jobs"].update(Panel(build_jobs_table(data.get("jobs", [])), title="🦀 Jobs"))
+    layout["bottom"].update(Panel(build_nodes_table(data.get("nodes", [])), title="🦀 Nodes"))
+    layout["footer"].update(build_footer(tick))
 
     return layout
 
 
 def main():
+    tick = 0
     startup = fetch_json("/cluster_status")
     if startup.get("status") != "success":
         startup["hint"] = (
             "Set QUEUE_URL to the reachable orchestrator API, "
-            "for example QUEUE_URL=http://localhost:8000 when port-forwarding "
+            "for example QUEUE_URL=http://127.0.0.1:8000 when port-forwarding "
             "or QUEUE_URL=http://orchestrator:8000 inside the cluster."
         )
 
-    with Live(build_layout(startup), console=console, refresh_per_second=4) as live:
+    with Live(build_layout(startup, tick), console=console, refresh_per_second=4) as live:
         while True:
+            tick += 1
             data = fetch_json("/cluster_status")
             if data.get("status") != "success":
                 data["hint"] = (
                     "Confirm the orchestrator API is reachable and /cluster_status is served."
                 )
-            live.update(build_layout(data))
+            live.update(build_layout(data, tick))
             time.sleep(REFRESH_SECONDS)
 
 
