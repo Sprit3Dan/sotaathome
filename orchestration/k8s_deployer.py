@@ -235,14 +235,17 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
         logs = str(e)
         logger.exception(f"Error while monitoring job {job_name}: {e}")
 
-    logger.info(f"Cleaning up job {job_name} and pod {pod_name}...")
-    try:
-        batch_api.delete_namespaced_job(
-            name=job_name,
-            namespace=namespace,
-            propagation_policy="Background"
-        )
-    except Exception:
-        pass
+    if status == "success":
+        logger.info(f"Cleaning up successful job {job_name} and pod {pod_name}...")
+        try:
+            batch_api.delete_namespaced_job(
+                name=job_name,
+                namespace=namespace,
+                propagation_policy="Background"
+            )
+        except Exception:
+            pass
+    else:
+        logger.warning(f"Preserving failed job {job_name} and pod {pod_name} for inspection.")
 
     return {"status": status, "logs": logs, "pod_name": pod_name, "job_name": job_name}
