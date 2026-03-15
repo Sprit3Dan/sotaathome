@@ -102,7 +102,7 @@ def main():
         user_msg += f"Current train.py:\n```python\n{current_code}\n```\n"
         if history_lines:
             user_msg += "\nPrevious results this run:\n" + "\n".join(history_lines) + "\n"
-        user_msg += "\nPropose a new train.py that achieves lower val_bpb."
+        user_msg += "\nPropose a new train.py that achieves lower val_bpb. Return the COMPLETE file with no omissions, ellipses, or '...' placeholders — every line must be present and valid Python."
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -118,6 +118,12 @@ def main():
             proposal = completion.choices[0].message.parsed
             new_code = proposal.train_py
             log(f"Reasoning: {proposal.reasoning[:200]}")
+            # Validate syntax — reject truncated/placeholder responses
+            try:
+                compile(new_code, "train.py", "exec")
+            except SyntaxError as syn_err:
+                log(f"WARNING: LLM returned invalid Python ({syn_err}). Keeping current train.py.")
+                new_code = current_code
         except Exception as exc:
             log(f"WARNING: OpenAI call failed: {exc}. Keeping current train.py.")
             new_code = current_code
