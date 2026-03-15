@@ -204,7 +204,7 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
     try:
         while True:
             current_job = batch_api.read_namespaced_job(name=job_name, namespace=namespace)
-            if current_job.status.succeeded:
+            if (current_job.status.succeeded or 0) >= job_count:
                 logger.info(f"Job {job_name} completed successfully.")
                 status = "success"
                 break
