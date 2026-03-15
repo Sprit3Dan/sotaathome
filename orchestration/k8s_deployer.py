@@ -107,7 +107,7 @@ def deploy_research_job(task: ResearchItem, init_spec: InitContainerSpec) -> dic
             labels={
                 "app": "autoresearch",
                 "run_id": run_id,
-                "github_repo": task.github_repo.replace("/", "-")
+                "repo_ref": task.repo_ref.replace("/", "-")
             }
         ),
         spec=client.V1PodSpec(

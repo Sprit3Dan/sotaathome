@@ -1,35 +1,132 @@
 import uuid
-from typing import Optional
-from pydantic import BaseModel, Field
+from typing import Optional, Union, Annotated, Literal
+from pydantic import BaseModel, Field, TypeAdapter
 
-class ResearchItem(BaseModel):
+
+class VolumeMountSpec(BaseModel):
     """
-    Represents a single asynchronous, collaborative research task.
+    Specification for mounting a PersistentVolumeClaim (PVC) into the container.
+    """
+    name: str = Field(
+        ...,
+        description="The name of the volume to mount"
+    )
+    mount_path: str = Field(
+        ...,
+        description="The path within the container at which the volume should be mounted"
+    )
+
+
+class InitContainerSpec(BaseModel):
+    """
+    Specification for the init container that focuses only on installing
+    necessary dependencies for the model repository.
+    """
+    image: str = Field(
+        ...,
+        description="The container image to use for the init container (e.g., python:3.11-slim, ubuntu:22.04)"
+    )
+    command: list[str] = Field(
+        default_factory=list,
+        description="The command array to run inside the init container"
+    )
+    args: list[str] = Field(
+        default_factory=list,
+        description="The arguments to pass to the command"
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description="Environment variables required for initialization"
+    )
+    volume_mounts: list[VolumeMountSpec] = Field(
+        default_factory=list,
+        description="Volumes to mount into the init container (e.g., for persisting dependencies to be used by the main pod)"
+    )
+
+
+class ResearchItemBase(BaseModel):
+    """
+    Common fields shared across all research task types.
     """
     id: str = Field(
         default_factory=lambda: uuid.uuid4().hex,
         description="Unique identifier for the research task"
     )
-    github_repo: str = Field(
-        ..., 
-        description="The target GitHub repository reference (e.g., 'karpathy/autoresearch')"
-    )
     research_direction: str = Field(
-        ..., 
+        ...,
         description="The specific hypothesis, hyperparameter sweep, or training task to execute"
     )
-    base_branch: str = Field(
-        default="main", 
-        description="The base branch to branch off from for this research direction"
-    )
     discussion_or_pr_ref: Optional[int] = Field(
-        default=None, 
+        default=None,
         description="An optional GitHub Discussion or PR number that serves as context for this task"
+    )
+    init_container_spec: Optional[InitContainerSpec] = Field(
+        default=None,
+        description="A pre-built init container spec. When provided, LLM-based analysis is skipped entirely."
+    )
+
+    @property
+    def repo_ref(self) -> str:
+        raise NotImplementedError
+
+
+class GitHubResearchItem(ResearchItemBase):
+    """
+    Research task targeting a GitHub repository.
+    """
+    repo_type: Literal["github"] = "github"
+    github_repo: str = Field(
+        ...,
+        description="The target GitHub repository. Can be 'owner/repo' or a full URL."
+    )
+    base_branch: str = Field(
+        default="main",
+        description="The base branch to branch off from for this research direction"
     )
     commit_sha: Optional[str] = Field(
         default=None,
         description="An optional specific commit SHA to run the research against"
     )
+
+    @property
+    def repo_ref(self) -> str:
+        return self.github_repo
+
+
+class HuggingFaceResearchItem(ResearchItemBase):
+    """
+    Research task targeting a HuggingFace repository (model, dataset, or space).
+    """
+    repo_type: Literal["huggingface"]
+    hf_repo: str = Field(
+        ...,
+        description="The HuggingFace repository ID in 'namespace/repo-name' format (e.g., 'mistralai/Mistral-7B-v0.1')."
+    )
+    hf_repo_type: Literal["model", "dataset", "space"] = Field(
+        default="model",
+        description="The type of HuggingFace repository."
+    )
+    revision: str = Field(
+        default="main",
+        description="The branch, tag, or commit revision to use."
+    )
+
+    @property
+    def repo_ref(self) -> str:
+        return self.hf_repo
+
+
+ResearchItem = Annotated[
+    Union[GitHubResearchItem, HuggingFaceResearchItem],
+    Field(discriminator="repo_type")
+]
+
+_research_item_adapter = TypeAdapter(ResearchItem)
+
+
+def parse_research_item(data: dict) -> Union[GitHubResearchItem, HuggingFaceResearchItem]:
+    return _research_item_adapter.validate_python(data)
+
 
 class TaskStatusUpdate(BaseModel):
     """
@@ -39,42 +136,3 @@ class TaskStatusUpdate(BaseModel):
     status: str = Field(..., description="The new status (e.g., 'processing', 'success', 'failed')")
     logs: Optional[str] = Field(default=None, description="Optional logs or error messages")
     pod_name: Optional[str] = Field(default=None, description="The name of the Kubernetes pod if scheduled")
-
-class VolumeMountSpec(BaseModel):
-    """
-    Specification for mounting a PersistentVolumeClaim (PVC) into the container.
-    """
-    name: str = Field(
-        ..., 
-        description="The name of the volume to mount"
-    )
-    mount_path: str = Field(
-        ..., 
-        description="The path within the container at which the volume should be mounted"
-    )
-
-class InitContainerSpec(BaseModel):
-    """
-    Specification for the init container that focuses only on installing 
-    necessary dependencies for the model repository.
-    """
-    image: str = Field(
-        ..., 
-        description="The container image to use for the init container (e.g., python:3.11-slim, ubuntu:22.04)"
-    )
-    command: list[str] = Field(
-        default_factory=list, 
-        description="The command array to run inside the init container"
-    )
-    args: list[str] = Field(
-        default_factory=list, 
-        description="The arguments to pass to the command"
-    )
-    env: dict[str, str] = Field(
-        default_factory=dict, 
-        description="Environment variables required for initialization"
-    )
-    volume_mounts: list[VolumeMountSpec] = Field(
-        default_factory=list,
-        description="Volumes to mount into the init container (e.g., for persisting dependencies to be used by the main pod)"
-    )

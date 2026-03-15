@@ -1,7 +1,7 @@
 import time
 import requests
 import logging
-from models import ResearchItem
+from models import parse_research_item
 from agent import generate_init_container_spec
 from k8s_deployer import deploy_research_job
 from settings import settings
@@ -32,15 +32,18 @@ def main():
                 
                 try:
                     # Parse the item from the queue
-                    task_item = ResearchItem(**task_data)
+                    task_item = parse_research_item(task_data)
                         
                     max_attempts = settings.MAX_RETRIES
                     previous_errors = None
                     
                     for attempt in range(1, max_attempts + 1):
-                        # Blocking inference loop - we will not pull the next item until this finishes
-                        logger.info(f"Attempt {attempt}/{max_attempts}: Analyzing repository {task_item.github_repo} and generating spec...")
-                        spec = generate_init_container_spec(task_item, previous_errors=previous_errors)
+                        if task_item.init_container_spec:
+                            logger.info(f"Attempt {attempt}/{max_attempts}: Using provided InitContainerSpec, skipping LLM analysis.")
+                            spec = task_item.init_container_spec
+                        else:
+                            logger.info(f"Attempt {attempt}/{max_attempts}: Analyzing repository {task_item.repo_ref} and generating spec...")
+                            spec = generate_init_container_spec(task_item, previous_errors=previous_errors)
                         
                         logger.debug(f"\n--- Generated InitContainerSpec ---\n{spec.model_dump_json(indent=2)}")
                         
