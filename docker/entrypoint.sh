@@ -57,6 +57,10 @@ fi
 # HF datasets cache also goes on the bind-mount
 export HF_DATASETS_CACHE="${AR_CACHE}/hf_datasets"
 
+# torch.compile disk cache — avoids recompiling on every iteration/pod restart
+export TORCHINDUCTOR_CACHE_DIR="${AR_CACHE}/torchinductor"
+export TORCHINDUCTOR_FX_GRAPH_CACHE=1
+
 # ── 3. prepare-dataset.py ─────────────────────────────────────────────────────
 log "Running prepare-dataset.py --num-shards ${NUM_SHARDS} for ${DATASET_HF_REPO} ..."
 python3 /app/prepare-dataset.py --num-shards "${NUM_SHARDS}" \
